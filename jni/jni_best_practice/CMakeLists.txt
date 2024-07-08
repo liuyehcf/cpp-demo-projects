@@ -21,18 +21,26 @@ if("${JAVA_HOME}" STREQUAL "")
     message(FATAL_ERROR "env 'JAVA_HOME' is required")
 endif()
 # For high jdk version
-file(GLOB LIB_JVM ${JAVA_HOME}/lib/server/libjvm.so)
+string(TOLOWER "${CMAKE_SYSTEM_NAME}" SYSTEM_NAME_LOWER)
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+    set(DYLIB_SUFFIX "so")
+elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+    set(DYLIB_SUFFIX "dylib")
+endif()
+file(GLOB LIB_JVM ${JAVA_HOME}/lib/server/libjvm.${DYLIB_SUFFIX})
 if("${LIB_JVM}" STREQUAL "")
     # For low jdk version
-    file(GLOB_RECURSE LIB_JVM ${JAVA_HOME}/jre/lib/*/server/libjvm.so)
+    file(GLOB_RECURSE LIB_JVM_1 ${JAVA_HOME}/jre/lib/server/libjvm.${DYLIB_SUFFIX})
+    file(GLOB_RECURSE LIB_JVM_2 ${JAVA_HOME}/jre/lib/*/server/libjvm.${DYLIB_SUFFIX})
+    set(LIB_JVM ${LIB_JVM_1} ${LIB_JVM_2})
     if("${LIB_JVM}" STREQUAL "")
-    message(FATAL_ERROR "cannot find libjvm.so in ${JAVA_HOME}")
+        message(FATAL_ERROR "cannot find libjvm.${DYLIB_SUFFIX} in ${JAVA_HOME}")
     endif()
 endif()
 add_library(jvm SHARED IMPORTED)
 set_target_properties(jvm PROPERTIES IMPORTED_LOCATION ${LIB_JVM})
 target_include_directories(jvm INTERFACE ${JAVA_HOME}/include)
-target_include_directories(jvm INTERFACE ${JAVA_HOME}/include/linux)
+target_include_directories(jvm INTERFACE ${JAVA_HOME}/include/${SYSTEM_NAME_LOWER})
 
 target_link_libraries(${JNI_UTILS_LIB} PUBLIC jvm)
 
@@ -46,8 +54,9 @@ target_link_libraries(${TEST_NAME} PRIVATE ${GTEST_MAIN_LIBRARIES})
 
 file(GLOB_RECURSE TEST_JAVA_SOURCES "${CMAKE_SOURCE_DIR}/test/java/*.java")
 add_custom_target(build_java
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/classes
     COMMAND javac -d ${CMAKE_BINARY_DIR}/classes ${TEST_JAVA_SOURCES}
     DEPENDS ${TEST_JAVA_SOURCES}
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/test/java
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test/java
 )
 add_dependencies(${TEST_NAME} build_java)

@@ -62,16 +62,29 @@ public:
     AutoJobject() : _obj(nullptr) {}
     AutoJobject(const AutoJobject&) = delete;
     AutoJobject(AutoJobject&&) = delete;
-    AutoJobject& operator=(const AutoJobject&) = default;
-    AutoJobject& operator=(AutoJobject&&) = default;
+    AutoJobject& operator=(const AutoJobject&) = delete;
+    AutoJobject& operator=(AutoJobject&&) = delete;
+    AutoJobject& operator=(jobject obj) {
+        release();
+        _obj = obj;
+        return *this;
+    }
     ~AutoJobject() { release(); }
 
     jobject get() { return _obj; }
     operator jobject() const { return _obj; }
     operator jclass() const { return static_cast<jclass>(_obj); }
-    operator jarray() const { return static_cast<jarray>(_obj); }
-    operator jstring() const { return static_cast<jstring>(_obj); }
     operator jthrowable() const { return static_cast<jthrowable>(_obj); }
+    operator jstring() const { return static_cast<jstring>(_obj); }
+    operator jarray() const { return static_cast<jarray>(_obj); }
+    operator jbooleanArray() const { return static_cast<jbooleanArray>(_obj); }
+    operator jbyteArray() const { return static_cast<jbyteArray>(_obj); }
+    operator jcharArray() const { return static_cast<jcharArray>(_obj); }
+    operator jshortArray() const { return static_cast<jshortArray>(_obj); }
+    operator jintArray() const { return static_cast<jintArray>(_obj); }
+    operator jlongArray() const { return static_cast<jlongArray>(_obj); }
+    operator jfloatArray() const { return static_cast<jfloatArray>(_obj); }
+    operator jdoubleArray() const { return static_cast<jdoubleArray>(_obj); }
 
 private:
     void release() {
