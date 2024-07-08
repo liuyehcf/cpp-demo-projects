@@ -72,6 +72,7 @@ public:
     ~AutoJobject() { release(); }
 
     jobject get() { return _obj; }
+    operator bool() const { return _obj != nullptr; }
     operator jobject() const { return _obj; }
     operator jclass() const { return static_cast<jclass>(_obj); }
     operator jthrowable() const { return static_cast<jthrowable>(_obj); }
@@ -85,6 +86,7 @@ public:
     operator jlongArray() const { return static_cast<jlongArray>(_obj); }
     operator jfloatArray() const { return static_cast<jfloatArray>(_obj); }
     operator jdoubleArray() const { return static_cast<jdoubleArray>(_obj); }
+    operator jobjectArray() const { return static_cast<jobjectArray>(_obj); }
 
 private:
     void release() {
