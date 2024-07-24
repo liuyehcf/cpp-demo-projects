@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -139,7 +138,7 @@ JNIEnv* get_env() {
 
 jclass find_class(JNIEnv* env, const char* classname) {
     jclass jcls = env->FindClass(classname);
-    if (env->ExceptionOccurred()) {
+    if (env->ExceptionOccurred() != nullptr) {
         throw std::runtime_error("Failed to find class '" + std::string(classname) + "', Java Stack:\n" +
                                  get_jstack_trace(env));
     }
@@ -148,11 +147,12 @@ jclass find_class(JNIEnv* env, const char* classname) {
 
 Method get_mid(JNIEnv* env, jclass jcls, const char* name, const char* sig, bool is_static) {
     jmethodID mid;
-    if (is_static)
+    if (is_static) {
         mid = env->GetStaticMethodID(jcls, name, sig);
-    else
+    } else {
         mid = env->GetMethodID(jcls, name, sig);
-    if (env->ExceptionOccurred()) {
+    }
+    if (env->ExceptionOccurred() != nullptr) {
         throw std::runtime_error("Failed to get method '" + std::string(name) + "', Java Stack:\n" +
                                  get_jstack_trace(env));
     }
@@ -187,7 +187,7 @@ jvalue invoke_method(JNIEnv* env, jobject jobj, Method* method, ...) {
     }
     va_end(args);
 
-    if (env->ExceptionOccurred()) {
+    if (env->ExceptionOccurred() != nullptr) {
         throw std::runtime_error("Exception occurred while invoking object method '" + method->to_string() +
                                  "', Java Stack:\n" + get_jstack_trace(env));
     }
@@ -222,7 +222,7 @@ jvalue invoke_static_method(JNIEnv* env, jclass jcls, Method* method, ...) {
     }
     va_end(args);
 
-    if (env->ExceptionOccurred()) {
+    if (env->ExceptionOccurred() != nullptr) {
         throw std::runtime_error("Exception occurred while invoking static method '" + method->to_string() +
                                  "', Java Stack:\n" + get_jstack_trace(env));
     }
@@ -256,7 +256,7 @@ std::string Method::to_string() const {
         return "Invalid signature";
     }
 
-    std::string buffer = "";
+    std::string buffer;
 
     std::string parameters;
     while (sig[index] != ')') {

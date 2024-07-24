@@ -1,6 +1,6 @@
 #include <jni.h>
 
-#include <stdexcept>
+#include <string>
 
 namespace jni_utils {
 
@@ -19,7 +19,9 @@ namespace jni_utils {
 struct Method {
     Method(jmethodID mid_, const char* name_, const char* sig_) : mid(mid_), name(name_), sig(sig_) {
         const char* str = sig;
-        while (*str != ')') str++;
+        while (*str != ')') {
+            str++;
+        }
         str++;
         const_cast<char&>(return_type) = *str;
     }
@@ -58,6 +60,7 @@ enum RefType {
 template <RefType ref_type>
 class AutoJobject {
 public:
+    // NOLINTBEGIN(google-explicit-constructor, google-runtime-int)
     AutoJobject(jobject obj) : _obj(obj) {}
     AutoJobject() : _obj(nullptr) {}
     AutoJobject(const AutoJobject&) = delete;
@@ -87,15 +90,22 @@ public:
     operator jfloatArray() const { return static_cast<jfloatArray>(_obj); }
     operator jdoubleArray() const { return static_cast<jdoubleArray>(_obj); }
     operator jobjectArray() const { return static_cast<jobjectArray>(_obj); }
+    // NOLINTEND(google-explicit-constructor, google-runtime-int)
 
 private:
     void release() {
         if constexpr (RefType::LOCAL == ref_type) {
-            if (_obj != nullptr) get_env()->DeleteLocalRef(_obj);
+            if (_obj != nullptr) {
+                get_env()->DeleteLocalRef(_obj);
+            }
         } else if constexpr (RefType::GLOBAL == ref_type) {
-            if (_obj != nullptr) get_env()->DeleteGlobalRef(_obj);
+            if (_obj != nullptr) {
+                get_env()->DeleteGlobalRef(_obj);
+            }
         } else if constexpr (RefType::WEAK_GLOBAL == ref_type) {
-            if (_obj != nullptr) get_env()->DeleteWeakGlobalRef(_obj);
+            if (_obj != nullptr) {
+                get_env()->DeleteWeakGlobalRef(_obj);
+            }
         }
     }
     jobject _obj;
