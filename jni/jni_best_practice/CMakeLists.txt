@@ -8,10 +8,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wall")
 
 set(JNI_UTILS_LIB "jni_utils")
-file(GLOB HEADERS "${CMAKE_SOURCE_DIR}/src/*.h")
-file(GLOB SOURCES "${CMAKE_SOURCE_DIR}/src/*.cpp")
+file(GLOB HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
+file(GLOB SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 add_library(${JNI_UTILS_LIB} ${HEADERS} ${SOURCES})
-target_include_directories(${JNI_UTILS_LIB} PUBLIC ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(${JNI_UTILS_LIB} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_compile_options(${JNI_UTILS_LIB} PRIVATE -static-libstdc++)
 target_link_options(${JNI_UTILS_LIB} PRIVATE -static-libstdc++)
@@ -44,19 +44,22 @@ target_include_directories(jvm INTERFACE ${JAVA_HOME}/include/${SYSTEM_NAME_LOWE
 
 target_link_libraries(${JNI_UTILS_LIB} PUBLIC jvm)
 
-find_package(GTest REQUIRED)
-file(GLOB TEST_SOURCES "${CMAKE_SOURCE_DIR}/test/*.cpp")
-set(TEST_NAME "${JNI_UTILS_LIB}_test")
-add_executable(${TEST_NAME} ${TEST_SOURCES})
-target_link_libraries(${TEST_NAME} PRIVATE ${JNI_UTILS_LIB})
-target_link_libraries(${TEST_NAME} PRIVATE ${GTEST_LIBRARIES})
-target_link_libraries(${TEST_NAME} PRIVATE ${GTEST_MAIN_LIBRARIES})
+option(ENABLE_JNI_UTIL_TEST "Whether enable tests" OFF)
+if(ENABLE_JNI_UTIL_TEST)
+    find_package(GTest REQUIRED)
+    file(GLOB TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp")
+    set(TEST_NAME "${JNI_UTILS_LIB}_test")
+    add_executable(${TEST_NAME} ${TEST_SOURCES})
+    target_link_libraries(${TEST_NAME} PRIVATE ${JNI_UTILS_LIB})
+    target_link_libraries(${TEST_NAME} PRIVATE ${GTEST_LIBRARIES})
+    target_link_libraries(${TEST_NAME} PRIVATE ${GTEST_MAIN_LIBRARIES})
 
-file(GLOB_RECURSE TEST_JAVA_SOURCES "${CMAKE_SOURCE_DIR}/test/java/*.java")
-add_custom_target(build_java
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/classes
-    COMMAND javac -d ${CMAKE_BINARY_DIR}/classes ${TEST_JAVA_SOURCES}
-    DEPENDS ${TEST_JAVA_SOURCES}
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test/java
-)
-add_dependencies(${TEST_NAME} build_java)
+    file(GLOB_RECURSE TEST_JAVA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/test/java/*.java")
+    add_custom_target(build_java
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/classes
+        COMMAND javac -d ${CMAKE_CURRENT_BINARY_DIR}/classes ${TEST_JAVA_SOURCES}
+        DEPENDS ${TEST_JAVA_SOURCES}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/test/java
+    )
+    add_dependencies(${TEST_NAME} build_java)
+endif()
