@@ -59,12 +59,12 @@ add_custom_target(build_java
 # Server
 file(GLOB SERVER_SOURCE ${CMAKE_SOURCE_DIR}/src/server/*.cpp)
 add_executable(echo_server ${SERVER_SOURCE} ${PROTO_SOURCE})
-target_include_directories(echo_server PRIVATE ${BRPC_INCLUDE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(echo_server PRIVATE ${BRPC_INCLUDE_PATH} ${CMAKE_BINARY_DIR})
 target_link_libraries(echo_server PRIVATE ${ALL_LIBS})
 add_dependencies(echo_server build_java)
 
 # Client
 file(GLOB CLIENT_SOURCE ${CMAKE_SOURCE_DIR}/src/client/*.cpp)
 add_executable(echo_client ${CLIENT_SOURCE} ${PROTO_SOURCE})
-target_include_directories(echo_client PRIVATE ${ALL_LIB_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(echo_client PRIVATE ${ALL_LIB_INCLUDE_DIRS} ${CMAKE_BINARY_DIR})
 target_link_libraries(echo_client PRIVATE ${ALL_LIBS})

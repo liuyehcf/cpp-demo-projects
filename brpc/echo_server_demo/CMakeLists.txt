@@ -48,11 +48,11 @@ protobuf_generate_cpp(PROTO_SOURCE PROTO_HEADER ${PROTO_DEFINITION})
 # Server
 file(GLOB SERVER_SOURCE ${CMAKE_SOURCE_DIR}/src/server/*.cpp)
 add_executable(echo_server ${SERVER_SOURCE} ${PROTO_SOURCE})
-target_include_directories(echo_server PRIVATE ${BRPC_INCLUDE_PATH} ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(echo_server PRIVATE ${BRPC_INCLUDE_PATH} ${CMAKE_BINARY_DIR})
 target_link_libraries(echo_server PRIVATE ${ALL_LIBS})
 
 # Client
 file(GLOB CLIENT_SOURCE ${CMAKE_SOURCE_DIR}/src/client/*.cpp)
 add_executable(echo_client ${CLIENT_SOURCE} ${PROTO_SOURCE})
-target_include_directories(echo_client PRIVATE ${ALL_LIB_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(echo_client PRIVATE ${ALL_LIB_INCLUDE_DIRS} ${CMAKE_BINARY_DIR})
 target_link_libraries(echo_client PRIVATE ${ALL_LIBS})
