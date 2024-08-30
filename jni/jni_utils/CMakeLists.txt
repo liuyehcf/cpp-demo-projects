@@ -5,7 +5,7 @@ project(jni_utils)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wall")
+add_compile_options(-O3 -Wall)
 
 file(GLOB HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
 file(GLOB SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
