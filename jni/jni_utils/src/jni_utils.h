@@ -94,19 +94,17 @@ public:
 
 private:
     void release() {
-        if constexpr (RefType::LOCAL == ref_type) {
-            if (_obj != nullptr) {
-                get_env()->DeleteLocalRef(_obj);
-            }
-        } else if constexpr (RefType::GLOBAL == ref_type) {
-            if (_obj != nullptr) {
-                get_env()->DeleteGlobalRef(_obj);
-            }
-        } else if constexpr (RefType::WEAK_GLOBAL == ref_type) {
-            if (_obj != nullptr) {
-                get_env()->DeleteWeakGlobalRef(_obj);
-            }
+        if (_obj == nullptr) {
+            return;
         }
+        if constexpr (RefType::LOCAL == ref_type) {
+            get_env()->DeleteLocalRef(_obj);
+        } else if constexpr (RefType::GLOBAL == ref_type) {
+            get_env()->DeleteGlobalRef(_obj);
+        } else if constexpr (RefType::WEAK_GLOBAL == ref_type) {
+            get_env()->DeleteWeakGlobalRef(_obj);
+        }
+        _obj = nullptr;
     }
     jobject _obj;
 };
