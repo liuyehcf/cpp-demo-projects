@@ -75,6 +75,7 @@ public class ArrowStreamProvider extends ArrowReader {
         System.out.println("Calling closeReadSource");
         root.close();
         intVector.close();
+        allocator.close();
     }
 
     @Override

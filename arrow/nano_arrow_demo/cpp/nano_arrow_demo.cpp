@@ -59,6 +59,7 @@ void print_arrow_stream(ArrowArrayStream* stream) {
 void read_data_from_java_side() {
     std::cout << "============================= read_data_from_java_side =============================" << std::endl;
     ArrowArrayStream stream;
+    memset(&stream, 0, sizeof(ArrowArrayStream));
 
     using namespace jni_utils;
     auto* env = get_env();
@@ -66,6 +67,8 @@ void read_data_from_java_side() {
     auto mid = get_mid(env, jcls, "generate", "(J)V", true);
     invoke_static_method(env, jcls, &mid, &stream);
     print_arrow_stream(&stream);
+
+    if (stream.release) stream.release(&stream);
 }
 
 void write_data_to_java_side() {
