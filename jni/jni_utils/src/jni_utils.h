@@ -1,6 +1,8 @@
 #include <jni.h>
 
+#include <map>
 #include <string>
+#include <vector>
 
 namespace jni_utils {
 
@@ -45,11 +47,23 @@ struct Method {
     const char return_type = '\0';
 };
 
+// Basic methods
 JNIEnv* get_env();
 jclass find_class(JNIEnv* env, const char* classname);
 Method get_mid(JNIEnv* env, jclass jcls, const char* name, const char* sig, bool is_static);
 jvalue invoke_method(JNIEnv* env, jobject jobj, Method* method, ...);
 jvalue invoke_static_method(JNIEnv* env, jclass jcls, Method* method, ...);
+jobject invoke_new_object(JNIEnv* env, jclass jcls, Method* method, ...);
+
+// Util methods
+std::string jstr_to_str(JNIEnv* env, jstring jstr);                                 // std::string to java.lang.String
+std::string jbytes_to_str(JNIEnv* env, jbyteArray obj);                             // byte[] to std::string
+jobject new_jbytes(JNIEnv* env, const char* data, size_t size);                     // create byte[]
+jobject get_from_jmap(JNIEnv* env, jobject jmap, const std::string& key);           // java.util.Map get method
+jobject map_to_jmap(JNIEnv* env, const std::map<std::string, std::string>& params); // std::map to java.util.Map
+jobject vstrs_to_jlstrs(
+        JNIEnv* env,
+        const std::vector<std::string>& vec); // std::vector<std::string> to java.util.List<java.lang.String>
 
 enum RefType {
     LOCAL,

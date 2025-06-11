@@ -15,18 +15,30 @@ static constexpr auto CLASSPATH = "CLASSPATH";
 static constexpr auto OPT_CLASSPATH = "-Djava.class.path=";
 static constexpr auto JVM_ARGS = "JNI_OPS";
 
+jclass jcls_class = nullptr;
 jclass jcls_list = nullptr;
-jclass jcls_hash_map = nullptr;
+jclass jcls_arraylist = nullptr;
+jclass jcls_hashmap = nullptr;
 
 static void init_common_classes(JNIEnv* env) {
+    {
+        jclass jcls = find_class(env, "java/lang/Class");
+        jcls_class = static_cast<jclass>(env->NewGlobalRef(jcls));
+        env->DeleteLocalRef(jcls);
+    }
     {
         jclass jcls = find_class(env, "java/util/List");
         jcls_list = static_cast<jclass>(env->NewGlobalRef(jcls));
         env->DeleteLocalRef(jcls);
     }
     {
+        jclass jcls = find_class(env, "java/util/ArrayList");
+        jcls_arraylist = static_cast<jclass>(env->NewGlobalRef(jcls));
+        env->DeleteLocalRef(jcls);
+    }
+    {
         jclass jcls = find_class(env, "java/util/HashMap");
-        jcls_hash_map = static_cast<jclass>(env->NewGlobalRef(jcls));
+        jcls_hashmap = static_cast<jclass>(env->NewGlobalRef(jcls));
         env->DeleteLocalRef(jcls);
     }
 }
@@ -229,6 +241,21 @@ jvalue invoke_static_method(JNIEnv* env, jclass jcls, Method* method, ...) {
     return res;
 }
 
+jobject invoke_new_object(JNIEnv* env, jclass jcls, Method* method, ...) {
+    va_list args;
+    jobject res;
+
+    va_start(args, method);
+    res = env->NewObjectV(jcls, method->mid, args);
+    va_end(args);
+
+    if (env->ExceptionOccurred() != nullptr) {
+        throw std::runtime_error("Exception occurred while invoking <init> method '" + method->to_string() +
+                                 "', Java Stack:\n" + get_jstack_trace(env));
+    }
+    return res;
+}
+
 static std::string parse_type(const char* sig, size_t& index) {
     static std::unordered_map<char, std::string> TYPE_MAP = {
             {JBYTE, "byte"}, {JCHAR, "char"},   {JDOUBLE, "double"},   {JFLOAT, "float"}, {JINT, "int"},
@@ -271,5 +298,67 @@ std::string Method::to_string() const {
     buffer.append(parse_type(sig, index)).append(" ").append(name).append("(").append(parameters).append(")");
 
     return buffer;
+}
+
+std::string jstr_to_str(JNIEnv* env, jstring jstr) {
+    if (!jstr) return "";
+    const char* chars = env->GetStringUTFChars(jstr, nullptr);
+    std::string res = chars;
+    env->ReleaseStringUTFChars(jstr, chars);
+    return res;
+}
+
+std::string jbytes_to_str(JNIEnv* env, jbyteArray obj) {
+    jbyte* bytes = env->GetByteArrayElements(obj, nullptr);
+    jsize length = env->GetArrayLength(obj);
+    std::string result(reinterpret_cast<char*>(bytes), length);
+    env->ReleaseByteArrayElements(obj, bytes, JNI_ABORT);
+    return result;
+}
+
+jobject new_jbytes(JNIEnv* env, const char* data, size_t size) {
+    jbyteArray jbytes = env->NewByteArray(size);
+    env->SetByteArrayRegion(jbytes, 0, size, reinterpret_cast<const jbyte*>(data));
+    return jbytes;
+}
+
+jobject get_from_jmap(JNIEnv* env, jobject jmap, const std::string& key) {
+    const char* signature_get = "(Ljava/lang/Object;)Ljava/lang/Object;";
+    Method m_get = get_mid(env, jcls_hashmap, "get", signature_get, false);
+
+    AutoLocalJobject jstr_key = env->NewStringUTF(key.c_str());
+    jvalue return_val = invoke_method(env, jmap, &m_get, jstr_key.get());
+    return return_val.l;
+}
+
+jobject map_to_jmap(JNIEnv* env, const std::map<std::string, std::string>& params) {
+    const char* signature_ctor = "()V";
+    const char* signature_put = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;";
+    Method m_ctor = get_mid(env, jcls_hashmap, "<init>", signature_ctor, false);
+    Method m_put = get_mid(env, jcls_hashmap, "put", signature_put, false);
+
+    jobject jmap = invoke_new_object(env, jcls_hashmap, &m_ctor);
+    for (const auto& entry : params) {
+        AutoLocalJobject jstr_key = env->NewStringUTF(entry.first.c_str());
+        AutoLocalJobject jstr_value = env->NewStringUTF(entry.second.c_str());
+        jvalue return_val = invoke_method(env, jmap, &m_put, jstr_key.get(), jstr_value.get());
+        AutoLocalJobject tmp = return_val.l;
+    }
+    return jmap;
+}
+
+jobject vstrs_to_jlstrs(JNIEnv* env, const std::vector<std::string>& vec) {
+    const char* signature_ctor = "()V";
+    const char* signature_add = "(Ljava/lang/Object;)Z";
+    Method m_ctor = get_mid(env, jcls_arraylist, "<init>", signature_ctor, false);
+    Method m_add = get_mid(env, jcls_arraylist, "add", signature_add, false);
+
+    jobject jlist = invoke_new_object(env, jcls_arraylist, &m_ctor);
+
+    for (const auto& item : vec) {
+        AutoLocalJobject jstr_item = env->NewStringUTF(item.c_str());
+        invoke_method(env, jlist, &m_add, jstr_item.get());
+    }
+    return jlist;
 }
 } // namespace jni_utils

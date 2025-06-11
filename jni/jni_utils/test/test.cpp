@@ -157,3 +157,83 @@ TEST(JNIUtils, exception) {
     invoke(env, jobj, &m_run5, true, (jbyte)1, (jchar)2, (jshort)3, 4, 5, 7.0f, 8.0, nullptr, nullptr, nullptr, nullptr,
            nullptr);
 }
+
+TEST(JNIUtils, jstring_to_str) {
+    JNIEnv* env = jni_utils::get_env();
+    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
+
+    auto m_get_string = jni_utils::get_mid(env, jcls, "getString", "()Ljava/lang/String;", true);
+    jvalue return_val = jni_utils::invoke_static_method(env, jcls, &m_get_string);
+    jni_utils::AutoLocalJobject jstr = return_val.l;
+
+    std::string str = jni_utils::jstr_to_str(env, jstr);
+    ASSERT_EQ(str, "Hello, JNI!");
+}
+
+TEST(JNIUtils, jbytes_to_str) {
+    JNIEnv* env = jni_utils::get_env();
+    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
+
+    auto m_get_bytes = jni_utils::get_mid(env, jcls, "getBytes", "()[B", true);
+    jvalue return_val = jni_utils::invoke_static_method(env, jcls, &m_get_bytes);
+    jni_utils::AutoLocalJobject jbytes = return_val.l;
+
+    std::string str = jni_utils::jbytes_to_str(env, jbytes);
+    ASSERT_EQ(str, "Hello, JNI!");
+}
+
+TEST(JNIUtils, new_jbytes) {
+    JNIEnv* env = jni_utils::get_env();
+    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
+
+    auto m_print = jni_utils::get_mid(env, jcls, "print", "(Ljava/lang/Object;)V", true);
+    std::string str = "Hello, JNI!";
+    jni_utils::AutoLocalJobject jbytes = jni_utils::new_jbytes(env, str.data(), str.size());
+    jni_utils::invoke_static_method(env, jcls, &m_print, jbytes.get());
+}
+
+TEST(JNIUtils, get_from_jmap) {
+    JNIEnv* env = jni_utils::get_env();
+    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
+
+    auto m_get_hash_map = jni_utils::get_mid(env, jcls, "getHashMap", "()Ljava/util/HashMap;", true);
+    jvalue return_val = jni_utils::invoke_static_method(env, jcls, &m_get_hash_map);
+    jni_utils::AutoLocalJobject jmap = return_val.l;
+
+    std::string key1 = "key1";
+    std::string key2 = "key2";
+    jni_utils::AutoLocalJobject jvalue1 = jni_utils::get_from_jmap(env, jmap, key1);
+    jni_utils::AutoLocalJobject jvalue2 = jni_utils::get_from_jmap(env, jmap, key2);
+
+    std::string value1 = jni_utils::jstr_to_str(env, static_cast<jstring>(jvalue1.get()));
+    std::string value2 = jni_utils::jstr_to_str(env, static_cast<jstring>(jvalue2.get()));
+
+    ASSERT_EQ(value1, "value1");
+    ASSERT_EQ(value2, "value2");
+}
+
+TEST(JNIUtils, map_to_jmap) {
+    JNIEnv* env = jni_utils::get_env();
+    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
+
+    auto m_print = jni_utils::get_mid(env, jcls, "print", "(Ljava/lang/Object;)V", true);
+
+    std::map<std::string, std::string> map;
+    map["key1"] = "value1";
+    map["key2"] = "value2";
+
+    jni_utils::AutoLocalJobject jmap = jni_utils::map_to_jmap(env, map);
+    jni_utils::invoke_static_method(env, jcls, &m_print, jmap.get());
+}
+
+TEST(JNIUtils, vstrs_to_jlstrs) {
+    JNIEnv* env = jni_utils::get_env();
+    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
+
+    auto m_print = jni_utils::get_mid(env, jcls, "print", "(Ljava/lang/Object;)V", true);
+
+    std::vector<std::string> vec = {"Hello", "JNI", "World"};
+    jni_utils::AutoLocalJobject jlist = jni_utils::vstrs_to_jlstrs(env, vec);
+
+    jni_utils::invoke_static_method(env, jcls, &m_print, jlist.get());
+}
