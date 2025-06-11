@@ -36,6 +36,7 @@ public class ArrowStreamConsumer {
                                     "    %s: %s\n", vector.getName(), vector.getObject(i));
                         }
                     }
+                    root.clear();
                 }
                 System.out.println("[java] Step6: Finish loading batches");
             }
