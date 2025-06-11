@@ -163,56 +163,58 @@ void batch_write_data_to_java_side() {
 void stream_write_data_to_java_side() {
     class StreamingRecordBatchReader : public arrow::RecordBatchReader {
     public:
-        explicit StreamingRecordBatchReader()
-                : schema_(arrow::schema({arrow::field("col_str", arrow::utf8())})), finished_(false) {}
-        std::shared_ptr<arrow::Schema> schema() const override { return schema_; }
+        StreamingRecordBatchReader() {
+            _schema = arrow::schema({arrow::field(
+                    "person", arrow::struct_({arrow::field("name", arrow::utf8()), arrow::field("age", arrow::int32()),
+                                              arrow::field("active", arrow::boolean())}))});
+        }
 
-        arrow::Status ReadNext(std::shared_ptr<arrow::RecordBatch>* out) override {
-            if (finished_) {
-                *out = nullptr; // No more data
+        std::shared_ptr<arrow::Schema> schema() const override { return _schema; }
+
+        arrow::Status ReadNext(std::shared_ptr<arrow::RecordBatch>* batch) override {
+            if (_batch_index >= _total_batches) {
+                *batch = nullptr;
                 return arrow::Status::OK();
             }
 
-            // Simulate receiving the next chunk of data
-            std::vector<std::string> next_chunk = GetNextBatch();
-            if (next_chunk.empty()) {
-                finished_ = true;
-                *out = nullptr;
-                return arrow::Status::OK();
+            std::cout << "[cpp] Generate batch " << _batch_index << std::endl;
+
+            arrow::StringBuilder name_builder;
+            arrow::Int32Builder age_builder;
+            arrow::BooleanBuilder active_builder;
+
+            for (size_t i = 0; i < _batch_size; ++i) {
+                ARROW_RETURN_NOT_OK(name_builder.Append("User_" + std::to_string(_batch_index * _batch_size + i)));
+                ARROW_RETURN_NOT_OK(age_builder.Append(20 + i));
+                ARROW_RETURN_NOT_OK(active_builder.Append(i % 2 == 0));
             }
 
-            // Convert strings to Arrow array
-            arrow::StringBuilder builder;
-            ARROW_RETURN_NOT_OK(builder.AppendValues(next_chunk));
+            std::shared_ptr<arrow::Array> name_array;
+            std::shared_ptr<arrow::Array> age_array;
+            std::shared_ptr<arrow::Array> active_array;
 
-            std::shared_ptr<arrow::Array> array;
-            ARROW_RETURN_NOT_OK(builder.Finish(&array));
+            ARROW_RETURN_NOT_OK(name_builder.Finish(&name_array));
+            ARROW_RETURN_NOT_OK(age_builder.Finish(&age_array));
+            ARROW_RETURN_NOT_OK(active_builder.Finish(&active_array));
 
-            *out = arrow::RecordBatch::Make(schema_, next_chunk.size(), {array});
+            auto struct_type = std::dynamic_pointer_cast<arrow::StructType>(_schema->field(0)->type());
+            auto struct_array = std::make_shared<arrow::StructArray>(
+                    struct_type, name_array->length(),
+                    std::vector<std::shared_ptr<arrow::Array>>{name_array, age_array, active_array});
+
+            std::cout << "[cpp] Batch values: " << struct_array->ToString() << std::endl;
+
+            *batch = arrow::RecordBatch::Make(_schema, struct_array->length(), {struct_array});
+
+            _batch_index++;
             return arrow::Status::OK();
         }
 
     private:
-        std::shared_ptr<arrow::Schema> schema_;
-        bool finished_;
-
-        std::vector<std::string> GetNextBatch() {
-            static int call_count = 0;
-            if (call_count == 0) {
-                ++call_count;
-                std::cout << "[cpp] Generate first batch" << std::endl;
-                return {"streamed_apple", "streamed_banana"};
-            } else if (call_count == 1) {
-                ++call_count;
-                std::cout << "[cpp] Generate second batch" << std::endl;
-                return {"streamed_cherry"};
-            } else if (call_count == 2) {
-                ++call_count;
-                std::cout << "[cpp] Generate third batch" << std::endl;
-                return {"streamed_date", "streamed_elderberry"};
-            }
-            return {};
-        }
+        const size_t _batch_size = 2;
+        size_t _batch_index = 0;
+        const size_t _total_batches = 3;
+        std::shared_ptr<arrow::Schema> _schema;
     };
     std::cout << "========================== stream_write_data_to_java_side ==========================" << std::endl;
 
