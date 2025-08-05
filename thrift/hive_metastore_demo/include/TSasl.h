@@ -20,7 +20,6 @@
 
 #pragma once
 
-// apt-get install libsasl2-dev
 #include <sasl/sasl.h>
 #include <sasl/saslplug.h>
 #include <sasl/saslutil.h>
