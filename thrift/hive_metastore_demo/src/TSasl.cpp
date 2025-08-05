@@ -24,6 +24,7 @@
 #include <boost/algorithm/string.hpp>
 #include <cstring>
 #include <sstream>
+#include <utility>
 
 using boost::algorithm::is_any_of;
 using boost::algorithm::join;
@@ -32,8 +33,12 @@ using boost::algorithm::to_lower;
 
 namespace sasl {
 
-TSasl::TSasl(const std::string& service, const std::string& serverFQDN, sasl_callback_t* callbacks)
-        : service(service), serverFQDN(serverFQDN), authComplete(false), callbacks(callbacks), conn(nullptr) {}
+TSasl::TSasl(std::string service, std::string serverFQDN, sasl_callback_t* callbacks)
+        : service(std::move(service)),
+          serverFQDN(std::move(serverFQDN)),
+          authComplete(false),
+          callbacks(callbacks),
+          conn(nullptr) {}
 
 uint8_t* TSasl::unwrap(const uint8_t* incoming, const int offset, const uint32_t len, uint32_t* outLen) {
     uint32_t outputlen;
@@ -78,21 +83,15 @@ std::string TSasl::getUsername() {
     return ret;
 }
 
-TSaslClient::TSaslClient(const std::string& mechanisms, const std::string& authenticationId, const std::string& service,
-                         const std::string& serverFQDN, const std::map<std::string, std::string>& props,
+TSaslClient::TSaslClient(std::string mechanisms, const std::string& authenticationId, std::string service,
+                         std::string serverFQDN, const std::map<std::string, std::string>& props,
                          sasl_callback_t* callbacks)
-        : TSasl(service, serverFQDN, callbacks), clientStarted(false), mechList(mechanisms) {
+        : TSasl(std::move(service), std::move(serverFQDN), callbacks),
+          clientStarted(false),
+          mechList(std::move(mechanisms)) {
     if (!props.empty()) {
         throw SaslServerImplException("Properties not yet supported");
     }
-    /*
-  if (!authenticationId.empty()) {
-    // TODO: setup security property
-    sasl_security_properties_t secprops;
-    // populate  secprops
-    result = sasl_setprop(conn, SASL_AUTH_EXTERNAL, authenticationId.c_str());
-  }
-  */
 }
 
 void TSaslClient::setupSaslContext() {
@@ -167,9 +166,12 @@ bool TSaslClient::hasInitialResponse() {
     return true;
 }
 
-TSaslServer::TSaslServer(const std::string& service, const std::string& serverFQDN, const std::string& userRealm,
-                         unsigned flags, sasl_callback_t* callbacks)
-        : TSasl(service, serverFQDN, callbacks), userRealm(userRealm), flags(flags), serverStarted(false) {}
+TSaslServer::TSaslServer(std::string service, std::string serverFQDN, std::string userRealm, unsigned flags,
+                         sasl_callback_t* callbacks)
+        : TSasl(std::move(service), std::move(serverFQDN), callbacks),
+          userRealm(std::move(userRealm)),
+          flags(flags),
+          serverStarted(false) {}
 
 void TSaslServer::setupSaslContext() {
     int result = sasl_server_new(service.c_str(), serverFQDN.size() == 0 ? nullptr : serverFQDN.c_str(),

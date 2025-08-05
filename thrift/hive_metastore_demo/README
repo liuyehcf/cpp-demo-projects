@@ -1,0 +1,6 @@
+
+# Insall Dependencies
+
+```sh
+apt install -y libsasl2-modules-gssapi-mit
+```

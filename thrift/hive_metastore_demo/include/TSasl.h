@@ -110,7 +110,7 @@ protected:
     /* Sasl Connection. */
     sasl_conn_t* conn;
 
-    TSasl(const std::string& service, const std::string& serverFQDN, sasl_callback_t* callbacks);
+    TSasl(std::string service, std::string serverFQDN, sasl_callback_t* callbacks);
 
     /* Dispose of the SASL state. It is called once per connection as a part of teardown. */
     void disposeSaslContext() {
@@ -129,9 +129,8 @@ public:
 /* Client sasl implementation class. */
 class TSaslClient : public sasl::TSasl {
 public:
-    TSaslClient(const std::string& mechanisms, const std::string& authenticationId, const std::string& service,
-                const std::string& serverFQDN, const std::map<std::string, std::string>& props,
-                sasl_callback_t* callbacks);
+    TSaslClient(std::string mechanisms, const std::string& authenticationId, std::string service,
+                std::string serverFQDN, const std::map<std::string, std::string>& props, sasl_callback_t* callbacks);
 
     static void SaslInit(sasl_callback_t* callbacks) {
         int result = sasl_client_init(callbacks);
@@ -147,7 +146,7 @@ public:
     std::string getMechanismName() override;
 
     /* Retrieves the negotiated property */
-    std::string getNegotiatedProperty(const std::string& propName);
+    static std::string getNegotiatedProperty(const std::string& propName);
 
     /* Setup the SASL client negotiation state. */
     void setupSaslContext() override;
@@ -177,7 +176,7 @@ public:
 /* Server sasl implementation class. */
 class TSaslServer : public sasl::TSasl {
 public:
-    TSaslServer(const std::string& service, const std::string& serverFQDN, const std::string& userRealm, unsigned flags,
+    TSaslServer(std::string service, std::string serverFQDN, std::string userRealm, unsigned flags,
                 sasl_callback_t* callbacks);
 
     /*
