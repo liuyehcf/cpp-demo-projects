@@ -42,7 +42,7 @@ impl LanceTableManager {
     }
 
     /// Write data to an existing Lance table using low-level Lance API
-    pub async fn write_data(&mut self, data: &[SampleData]) -> Result<()> {
+    pub async fn write_from_batch(&mut self, data: &[SampleData]) -> Result<()> {
         if let Some(dataset) = &mut self.dataset {
             // Convert sample data to RecordBatch
             let batch = sample_data_to_record_batch(data)?;
@@ -50,9 +50,29 @@ impl LanceTableManager {
 
             // Create RecordBatchIterator
             let batches = RecordBatchIterator::new(vec![Ok(batch)].into_iter(), schema);
+            println!("[rust]: Starting to append data...");
 
             // Use low-level Lance API to append data
             dataset.append(batches, None).await?;
+            println!("[rust]: Data appended successfully.");
+        } else {
+            return Err(anyhow::anyhow!("No dataset opened. Call open_table first."));
+        }
+
+        Ok(())
+    }
+
+    /// Write data directly from a RecordBatchReader to avoid buffering all data in memory
+    pub async fn write_from_stream(
+        &mut self,
+        reader: Box<dyn arrow::record_batch::RecordBatchReader + Send + 'static>,
+    ) -> Result<()> {
+        if let Some(dataset) = &mut self.dataset {
+            println!("[rust]: Starting to append data directly from stream...");
+
+            // Use low-level Lance API to append data directly from the reader
+            dataset.append(reader, None).await?;
+            println!("[rust]: Stream data appended successfully.");
         } else {
             return Err(anyhow::anyhow!("No dataset opened. Call open_table first."));
         }
@@ -66,6 +86,7 @@ impl LanceTableManager {
             // Create a scanner and convert to stream
             let scanner = dataset.scan();
             let mut stream = scanner.try_into_stream().await?;
+            println!("[rust]: Scanner created, start to read data...");
 
             let mut results = Vec::new();
             while let Some(batch) = stream.try_next().await? {
@@ -73,6 +94,7 @@ impl LanceTableManager {
                 results.extend(sample_data);
             }
 
+            println!("[rust]: Finished reading all data.");
             Ok(results)
         } else {
             Err(anyhow::anyhow!("No dataset opened. Call open_table first."))
@@ -125,7 +147,7 @@ impl LanceTableManager {
     /// Delete the table
     pub async fn drop_table(&self) -> Result<()> {
         std::fs::remove_dir_all(&self.path)?;
-        println!("Dropped table at path '{}'", self.path);
+        println!("[rust]: Dropped table at path '{}'", self.path);
         Ok(())
     }
 }

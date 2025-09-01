@@ -1,5 +1,8 @@
 use crate::{LanceTableManager, SampleData};
-use arrow::{ffi_stream::FFI_ArrowArrayStream, record_batch::RecordBatchIterator};
+use arrow::{
+    ffi_stream::FFI_ArrowArrayStream,
+    record_batch::{RecordBatchIterator, RecordBatchReader},
+};
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
 use std::sync::{Mutex, OnceLock};
@@ -14,61 +17,34 @@ static MANAGER: OnceLock<Mutex<LanceTableManager>> = OnceLock::new();
 pub extern "C" fn lance_init(db_path: *const c_char) -> c_int {
     // Check if already initialized
     if RUNTIME.get().is_some() {
-        return 1; // Already initialized
+        println!("[rust]: Already initialized");
+        return 1;
     }
 
-    let rt = match Runtime::new() {
-        Ok(rt) => rt,
-        Err(_) => return -1,
-    };
-
-    let path_str = unsafe {
-        match CStr::from_ptr(db_path).to_str() {
-            Ok(s) => s,
-            Err(_) => return -2,
-        }
-    };
+    let rt = Runtime::new().unwrap();
+    let path_str = unsafe { CStr::from_ptr(db_path).to_str().unwrap() };
 
     // Create dataset directory if it doesn't exist
-    eprintln!("Creating directory: {}", path_str);
-    if let Err(e) = std::fs::create_dir_all(path_str) {
-        eprintln!("Failed to create directory: {}", e);
-        return -4;
-    }
-    eprintln!("Directory created successfully: {}", path_str);
+    std::fs::create_dir_all(path_str).unwrap();
+    println!("[rust]: Directory created successfully: {}", path_str);
 
     let manager = LanceTableManager::new(path_str);
 
     // Set the runtime and manager using OnceLock
-    if RUNTIME.set(rt).is_err() {
-        return -5; // Failed to set runtime
-    }
+    RUNTIME.set(rt).unwrap();
     if MANAGER.set(Mutex::new(manager)).is_err() {
         return -6; // Failed to set manager
     }
 
-    0 // Success
+    0
 }
 
 // Create a new Lance table
 #[no_mangle]
 pub extern "C" fn lance_create_table(table_name: *const c_char) -> c_int {
-    let rt = match RUNTIME.get() {
-        Some(rt) => rt,
-        None => return -1, // Not initialized
-    };
-
-    let manager = match MANAGER.get() {
-        Some(m) => m,
-        None => return -1,
-    };
-
-    let name_str = unsafe {
-        match CStr::from_ptr(table_name).to_str() {
-            Ok(s) => s,
-            Err(_) => return -2,
-        }
-    };
+    let rt = RUNTIME.get().unwrap();
+    let manager = MANAGER.get().unwrap();
+    let name_str = unsafe { CStr::from_ptr(table_name).to_str().unwrap() };
 
     // Create sample data for table schema - need at least one meaningful record
     let _sample_data = vec![SampleData {
@@ -77,18 +53,15 @@ pub extern "C" fn lance_create_table(table_name: *const c_char) -> c_int {
         value: 100,
     }];
 
-    let manager_guard = match manager.lock() {
-        Ok(guard) => guard,
-        Err(_) => return -3,
-    };
+    let manager_guard = manager.lock().unwrap();
 
     match rt.block_on(manager_guard.create_table()) {
         Ok(_) => {
-            eprintln!("Table '{}' created successfully", name_str);
+            println!("[rust]: Table '{}' created successfully", name_str);
             0
         }
         Err(e) => {
-            eprintln!("Failed to create table '{}': {}", name_str, e);
+            println!("[rust]: Failed to create table '{}': {}", name_str, e);
             -3
         }
     }
@@ -100,82 +73,36 @@ pub extern "C" fn lance_write_arrow_stream(
     table_name: *const c_char,
     stream: *mut FFI_ArrowArrayStream,
 ) -> c_int {
-    let rt = match RUNTIME.get() {
-        Some(rt) => rt,
-        None => return -1,
-    };
+    let rt = RUNTIME.get().unwrap();
+    let manager = MANAGER.get().unwrap();
+    let table_name_str = unsafe { CStr::from_ptr(table_name).to_str().unwrap() };
 
-    let manager = match MANAGER.get() {
-        Some(m) => m,
-        None => return -1,
-    };
+    // Create a RecordBatchIterator directly from the FFI stream
+    // This avoids buffering all data in memory
+    let stream_reader =
+        unsafe { arrow::ffi_stream::ArrowArrayStreamReader::from_raw(&mut *stream).unwrap() };
 
-    let table_name_str = unsafe {
-        match CStr::from_ptr(table_name).to_str() {
-            Ok(s) => s,
-            Err(_) => return -2,
-        }
-    };
+    // ArrowArrayStreamReader already implements RecordBatchReader
+    // and is Send + 'static, so we can directly box it
+    let batch_iter = Box::new(stream_reader) as Box<dyn RecordBatchReader + Send + 'static>;
 
-    if stream.is_null() {
-        return -3;
-    }
-
-    // Convert FFI_ArrowArrayStream to RecordBatch
-    let stream_reader = unsafe {
-        match arrow::ffi_stream::ArrowArrayStreamReader::from_raw(&mut *stream) {
-            Ok(reader) => reader,
-            Err(e) => {
-                eprintln!("Failed to create stream reader: {}", e);
-                return -4;
-            }
-        }
-    };
-
-    let mut all_data = Vec::new();
-    for batch_result in stream_reader {
-        let batch = match batch_result {
-            Ok(batch) => batch,
-            Err(e) => {
-                eprintln!("Failed to read batch from stream: {}", e);
-                return -5;
-            }
-        };
-
-        // Convert RecordBatch to SampleData
-        let batch_data = match crate::record_batch_to_sample_data(&batch) {
-            Ok(data) => data,
-            Err(e) => {
-                eprintln!("Failed to convert RecordBatch to SampleData: {}", e);
-                return -6;
-            }
-        };
-        all_data.extend(batch_data);
-    }
-
-    let sample_data = all_data;
-
-    let mut manager_guard = match manager.lock() {
-        Ok(guard) => guard,
-        Err(_) => return -7,
-    };
+    let mut manager_guard = manager.lock().unwrap();
 
     // Open the table first
-    if let Err(_) = rt.block_on(manager_guard.open_table()) {
-        return -8; // Failed to open table
-    }
+    rt.block_on(manager_guard.open_table()).unwrap();
 
-    match rt.block_on(manager_guard.write_data(&sample_data)) {
+    // Use the new method to write directly from the stream without buffering
+    match rt.block_on(manager_guard.write_from_stream(batch_iter)) {
         Ok(_) => {
-            eprintln!(
-                "Arrow stream data written successfully to table '{}'",
+            println!(
+                "[rust]: Arrow stream data written successfully to table '{}'",
                 table_name_str
             );
             0
         }
         Err(e) => {
-            eprintln!("Failed to write Arrow stream data: {}", e);
-            -3
+            println!("[rust]: Failed to write Arrow stream data: {}", e);
+            1
         }
     }
 }
@@ -186,48 +113,19 @@ pub extern "C" fn lance_read_arrow_stream(
     table_name: *const c_char,
     stream: *mut FFI_ArrowArrayStream,
 ) -> c_int {
-    let rt = match RUNTIME.get() {
-        Some(rt) => rt,
-        None => return -1,
-    };
+    let rt = RUNTIME.get().unwrap();
+    let manager = MANAGER.get().unwrap();
+    let table_name_str = unsafe { CStr::from_ptr(table_name).to_str().unwrap() };
 
-    let manager = match MANAGER.get() {
-        Some(m) => m,
-        None => return -1,
-    };
-
-    let table_name_str = unsafe {
-        match CStr::from_ptr(table_name).to_str() {
-            Ok(s) => s,
-            Err(_) => return -2,
-        }
-    };
-
-    if stream.is_null() {
-        return -3;
-    }
-
-    let mut manager_guard = match manager.lock() {
-        Ok(guard) => guard,
-        Err(_) => return -4,
-    };
+    let mut manager_guard = manager.lock().unwrap();
 
     // Open the table first
-    if let Err(_) = rt.block_on(manager_guard.open_table()) {
-        return -5; // Failed to open table
-    }
+    rt.block_on(manager_guard.open_table()).unwrap();
 
     match rt.block_on(manager_guard.read_all_data()) {
         Ok(data) => {
             // Convert SampleData to RecordBatch
-            let batch = match crate::sample_data_to_record_batch(&data) {
-                Ok(batch) => batch,
-                Err(e) => {
-                    eprintln!("Failed to convert SampleData to RecordBatch: {}", e);
-                    return -4;
-                }
-            };
-
+            let batch = crate::sample_data_to_record_batch(&data).unwrap();
             // Create an iterator that yields the single batch
             let batches = vec![batch];
 
@@ -240,17 +138,24 @@ pub extern "C" fn lance_read_arrow_stream(
 
             // Export to FFI_ArrowArrayStream using new method
             unsafe {
-                *stream = FFI_ArrowArrayStream::new(Box::new(batch_iter));
+                // First initialize the stream with empty values
+                std::ptr::write(stream, FFI_ArrowArrayStream::empty());
+
+                // Try to create the stream
+                let new_stream = FFI_ArrowArrayStream::new(Box::new(batch_iter));
+
+                // Properly assign the stream to the pointer
+                std::ptr::write(stream, new_stream);
             }
-            eprintln!(
-                "Data read successfully from table '{}' as Arrow stream",
+            println!(
+                "[rust]: Data read successfully from table '{}' as Arrow stream",
                 table_name_str
             );
             0
         }
         Err(e) => {
-            eprintln!("Failed to read data: {}", e);
-            -6
+            println!("[rust]: Failed to read data: {}", e);
+            1
         }
     }
 }
@@ -264,5 +169,5 @@ pub extern "C" fn lance_cleanup() {
     // Note: OnceLock doesn't support clearing values once set
     // This is intentional as cleanup in FFI contexts can be problematic
     // The resources will be cleaned up when the process exits
-    eprintln!("Cleanup called - resources will be freed on process exit");
+    println!("[rust]: Cleanup called, resources will be freed on process exit");
 }

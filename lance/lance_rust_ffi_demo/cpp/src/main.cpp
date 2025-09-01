@@ -3,8 +3,11 @@
 #include <arrow/io/api.h>
 #include <arrow/ipc/api.h>
 
+#include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <memory>
+#include <thread>
 #include <vector>
 
 #include "lance_ffi.h"
@@ -15,9 +18,60 @@
         return -1;                                                 \
     }
 
-// Helper function to create Arrow data and export to ArrowArrayStream
-int create_arrow_stream(const std::vector<int32_t>& ids, const std::vector<std::string>& names,
-                        const std::vector<int32_t>& values, struct ArrowArrayStream* out_stream) {
+class TimedRecordBatchReader : public arrow::RecordBatchReader {
+public:
+    TimedRecordBatchReader(const std::shared_ptr<arrow::Schema>& schema, const std::vector<int32_t>& ids,
+                           const std::vector<std::string>& names, const std::vector<int32_t>& values)
+            : _schema(schema), _ids(ids), _names(names), _values(values) {}
+
+    std::shared_ptr<arrow::Schema> schema() const override { return _schema; }
+
+    arrow::Status ReadNext(std::shared_ptr<arrow::RecordBatch>* out) override {
+        if (_current_batch >= _ids.size()) {
+            *out = nullptr;
+            return arrow::Status::OK();
+        }
+
+        if (_current_batch > 0) {
+            std::cout << "[cpp]:     Waiting 1 seconds before generating next row..." << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        // Create Arrow arrays for this batch
+        arrow::Int32Builder id_builder;
+        arrow::StringBuilder name_builder;
+        arrow::Int32Builder value_builder;
+
+        ARROW_RETURN_NOT_OK(id_builder.Append(_ids[_current_batch]));
+        ARROW_RETURN_NOT_OK(name_builder.Append(_names[_current_batch]));
+        ARROW_RETURN_NOT_OK(value_builder.Append(_values[_current_batch]));
+
+        std::shared_ptr<arrow::Array> id_array;
+        std::shared_ptr<arrow::Array> name_array;
+        std::shared_ptr<arrow::Array> value_array;
+
+        ARROW_RETURN_NOT_OK(id_builder.Finish(&id_array));
+        ARROW_RETURN_NOT_OK(name_builder.Finish(&name_array));
+        ARROW_RETURN_NOT_OK(value_builder.Finish(&value_array));
+
+        // Create record batch
+        *out = arrow::RecordBatch::Make(_schema, 1, {id_array, name_array, value_array});
+        _current_batch++;
+
+        return arrow::Status::OK();
+    }
+
+private:
+    std::shared_ptr<arrow::Schema> _schema;
+    const std::vector<int32_t>& _ids;
+    const std::vector<std::string>& _names;
+    const std::vector<int32_t>& _values;
+    size_t _current_batch = 0;
+};
+
+int create_batch_arrow_stream(const std::shared_ptr<arrow::Schema>& schema, const std::vector<int32_t>& ids,
+                              const std::vector<std::string>& names, const std::vector<int32_t>& values,
+                              struct ArrowArrayStream* out_stream) {
     // Create Arrow arrays
     arrow::Int32Builder id_builder;
     arrow::StringBuilder name_builder;
@@ -47,10 +101,6 @@ int create_arrow_stream(const std::vector<int32_t>& ids, const std::vector<std::
     status = value_builder.Finish(&value_array);
     ASSERT_TRUE(status.ok(), "Failed to finish value array: " + status.ToString());
 
-    // Create schema
-    auto schema = arrow::schema({arrow::field("id", arrow::int32()), arrow::field("name", arrow::utf8()),
-                                 arrow::field("value", arrow::int32())});
-
     // Create record batch
     auto batch = arrow::RecordBatch::Make(schema, ids.size(), {id_array, name_array, value_array});
 
@@ -64,17 +114,28 @@ int create_arrow_stream(const std::vector<int32_t>& ids, const std::vector<std::
     auto export_result = arrow::ExportRecordBatchReader(reader, out_stream);
     ASSERT_TRUE(export_result.ok(), "Failed to export RecordBatchReader");
 
-    std::cout << "Created Arrow stream with " << ids.size() << " rows" << std::endl;
+    std::cout << "[cpp]:     Created batch Arrow stream with " << ids.size() << " rows" << std::endl;
     return 0;
 }
 
-// Helper function to read ArrowArrayStream and display data
+int create_customized_arrow_stream(const std::shared_ptr<arrow::Schema>& schema, const std::vector<int32_t>& ids,
+                                   const std::vector<std::string>& names, const std::vector<int32_t>& values,
+                                   struct ArrowArrayStream* out_stream) {
+    auto reader = std::make_shared<TimedRecordBatchReader>(schema, ids, names, values);
+    auto export_result = arrow::ExportRecordBatchReader(reader, out_stream);
+    ASSERT_TRUE(export_result.ok(), "Failed to export RecordBatchReader");
+    std::cout << "[cpp]:     Created customized Arrow stream with " << ids.size() << " rows" << std::endl;
+
+    return 0;
+}
+
 int display_arrow_stream(struct ArrowArrayStream* stream) {
     // Import ArrowArrayStream to Arrow C++ RecordBatchReader
     auto reader_result = arrow::ImportRecordBatchReader(stream);
     ASSERT_TRUE(reader_result.ok(), "Failed to import ArrowArrayStream");
     auto reader = reader_result.ValueOrDie();
 
+    std::cout << "[cpp]:     Received Arrow stream:" << std::endl;
     // Read all batches
     while (true) {
         auto batch_result = reader->Next();
@@ -89,7 +150,7 @@ int display_arrow_stream(struct ArrowArrayStream* stream) {
         auto value_array = std::static_pointer_cast<arrow::Int32Array>(batch->column(2));
 
         for (int64_t i = 0; i < batch->num_rows(); i++) {
-            std::cout << "  ID: " << id_array->Value(i) << ", Name: " << name_array->GetString(i)
+            std::cout << "[cpp]:         ID: " << id_array->Value(i) << ", Name: " << name_array->GetString(i)
                       << ", Value: " << value_array->Value(i) << std::endl;
         }
     }
@@ -97,47 +158,57 @@ int display_arrow_stream(struct ArrowArrayStream* stream) {
 }
 
 int main() {
-    std::cout << "=== Lance C++/Rust FFI Demo with Arrow Streams ===" << std::endl << std::endl;
+    // Cleanup any existing dataset
+    char read_link_res[1024];
+    const std::filesystem::path self = (std::string(read_link_res, readlink("/proc/self/exe", read_link_res, 1024)));
+    auto dir_path = self.parent_path();
+    std::string dataset_path = (dir_path / "lance_dataset").string();
+    std::filesystem::remove_all(dataset_path);
+
+    auto schema = arrow::schema({arrow::field("id", arrow::int32()), arrow::field("name", arrow::utf8()),
+                                 arrow::field("value", arrow::int32())});
 
     // Initialize Lance dataset
-    std::cout << "1. Initializing Lance dataset..." << std::endl;
-    int result = lance_init("./lance_dataset");
+    std::cout << "[cpp]: 1. Initializing Lance dataset..." << std::endl;
+    int result = lance_init(dataset_path.c_str());
     ASSERT_TRUE(result == 0, "Lance dataset initialization failed");
-    std::cout << "Database initialized successfully!" << std::endl << std::endl;
 
     // Create table
-    std::cout << "2. Creating table 'users'..." << std::endl;
+    std::cout << "[cpp]: 2. Creating table 'users'..." << std::endl;
     result = lance_create_table("users");
     ASSERT_TRUE(result == 0, "Table creation failed");
-    std::cout << "Table 'users' created successfully!" << std::endl << std::endl;
 
     // Create Arrow data and write to table
-    std::cout << "3. Creating Arrow data and writing to table..." << std::endl;
+    std::cout << "[cpp]: 3. Creating Arrow data and writing to table..." << std::endl;
     std::vector<int32_t> ids = {1, 2, 3, 4, 5};
     std::vector<std::string> names = {"Alice", "Bob", "Charlie", "Diana", "Eve"};
     std::vector<int32_t> values = {25, 30, 35, 28, 32};
-
-    struct ArrowArrayStream write_stream;
-    result = create_arrow_stream(ids, names, values, &write_stream);
+    struct ArrowArrayStream batch_stream;
+    result = create_batch_arrow_stream(schema, ids, names, values, &batch_stream);
     ASSERT_TRUE(result == 0, "Failed to create Arrow stream");
-
-    result = lance_write_arrow_stream("users", &write_stream);
+    result = lance_write_arrow_stream("users", &batch_stream);
     ASSERT_TRUE(result == 0, "Failed to write Arrow stream data");
-    std::cout << "Arrow stream data written successfully!" << std::endl << std::endl;
 
     // Read data as Arrow stream
-    std::cout << "4. Reading data as Arrow stream..." << std::endl;
+    std::cout << "[cpp]: 4. Reading data as Arrow stream..." << std::endl;
     struct ArrowArrayStream read_stream;
-
     result = lance_read_arrow_stream("users", &read_stream);
     ASSERT_TRUE(result == 0, "Failed to read Arrow stream data");
-    std::cout << "Received Arrow stream:" << std::endl;
     display_arrow_stream(&read_stream);
-    std::cout << "Arrow stream data read successfully!" << std::endl << std::endl;
 
-    std::cout << "=== Demo completed successfully! ===" << std::endl;
-    std::cout << std::endl;
-    std::cout << "Note: All data exchange used Arrow IPC streams between C++ and Rust" << std::endl;
+    // Demonstrating timed Arrow stream generation
+    std::cout << "[cpp]: 5. Demonstrating timed Arrow stream generation..." << std::endl;
+    struct ArrowArrayStream customized_stream;
+    result = create_customized_arrow_stream(schema, ids, names, values, &customized_stream);
+    ASSERT_TRUE(result == 0, "Failed to create timed Arrow stream");
+    result = lance_write_arrow_stream("users", &customized_stream);
+    ASSERT_TRUE(result == 0, "Failed to write Arrow stream data");
+
+    // Read data as Arrow stream
+    std::cout << "[cpp]: 6. Reading data as Arrow stream..." << std::endl;
+    result = lance_read_arrow_stream("users", &read_stream);
+    ASSERT_TRUE(result == 0, "Failed to read Arrow stream data");
+    display_arrow_stream(&read_stream);
 
     // Cleanup
     lance_cleanup();

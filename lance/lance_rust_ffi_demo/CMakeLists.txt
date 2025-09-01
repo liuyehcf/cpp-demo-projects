@@ -7,6 +7,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 add_compile_options(-O3 -Wall)
 
 option(ENABLE_ASAN "Enable AddressSanitizer" OFF)
+if(ENABLE_ASAN)
+    add_compile_options(-fsanitize=address -g)
+    add_link_options(-fsanitize=address -static-libasan)
+endif()
 
 # Find Arrow
 find_package(Arrow REQUIRED)
