@@ -27,6 +27,7 @@ public:
     std::shared_ptr<arrow::Schema> schema() const override { return _schema; }
 
     arrow::Status ReadNext(std::shared_ptr<arrow::RecordBatch>* out) override {
+        std::cout << "[cpp]:     ReadNext start" << std::endl;
         if (_current_batch >= _ids.size()) {
             *out = nullptr;
             return arrow::Status::OK();
@@ -168,49 +169,68 @@ int main() {
     auto schema = arrow::schema({arrow::field("id", arrow::int32()), arrow::field("name", arrow::utf8()),
                                  arrow::field("value", arrow::int32())});
 
-    // Initialize Lance dataset
-    std::cout << "[cpp]: 1. Initializing Lance dataset..." << std::endl;
+    std::cout << "[cpp]: << Initializing Lance dataset..." << std::endl;
     int result = lance_init(dataset_path.c_str());
     ASSERT_TRUE(result == 0, "Lance dataset initialization failed");
 
-    // Create table
-    std::cout << "[cpp]: 2. Creating table 'users'..." << std::endl;
+    std::cout << "[cpp]: << Creating table 'users'..." << std::endl;
     result = lance_create_table("users");
     ASSERT_TRUE(result == 0, "Table creation failed");
 
-    // Create Arrow data and write to table
-    std::cout << "[cpp]: 3. Creating Arrow data and writing to table..." << std::endl;
-    std::vector<int32_t> ids = {1, 2, 3, 4, 5};
-    std::vector<std::string> names = {"Alice", "Bob", "Charlie", "Diana", "Eve"};
-    std::vector<int32_t> values = {25, 30, 35, 28, 32};
-    struct ArrowArrayStream batch_stream;
-    result = create_batch_arrow_stream(schema, ids, names, values, &batch_stream);
+    std::vector<int32_t> ids_1 = {1, 2, 3, 4, 5};
+    std::vector<std::string> names_1 = {"Alice", "Bob", "Charlie", "Diana", "Eve"};
+    std::vector<int32_t> values_1 = {25, 30, 35, 28, 32};
+    std::vector<int32_t> ids_2 = {6, 7, 8, 9, 10};
+    std::vector<std::string> names_2 = {"Frank", "Grace", "Heidi", "Ivan", "Judy"};
+    std::vector<int32_t> values_2 = {60, 70, 80, 90, 100};
+
+    std::cout << "[cpp]: << Creating batch Arrow data and write to table in append mode..." << std::endl;
+    struct ArrowArrayStream write_stream;
+    result = create_batch_arrow_stream(schema, ids_1, names_1, values_1, &write_stream);
     ASSERT_TRUE(result == 0, "Failed to create Arrow stream");
-    result = lance_write_arrow_stream("users", &batch_stream);
+    result = lance_append_arrow_stream("users", &write_stream);
     ASSERT_TRUE(result == 0, "Failed to write Arrow stream data");
 
-    // Read data as Arrow stream
-    std::cout << "[cpp]: 4. Reading data as Arrow stream..." << std::endl;
+    std::cout << "[cpp]: << Reading data as Arrow stream..." << std::endl;
     struct ArrowArrayStream read_stream;
     result = lance_read_arrow_stream("users", &read_stream);
     ASSERT_TRUE(result == 0, "Failed to read Arrow stream data");
     display_arrow_stream(&read_stream);
 
-    // Demonstrating timed Arrow stream generation
-    std::cout << "[cpp]: 5. Demonstrating timed Arrow stream generation..." << std::endl;
-    struct ArrowArrayStream customized_stream;
-    result = create_customized_arrow_stream(schema, ids, names, values, &customized_stream);
-    ASSERT_TRUE(result == 0, "Failed to create timed Arrow stream");
-    result = lance_write_arrow_stream("users", &customized_stream);
+    std::cout << "[cpp]: << Creating batch Arrow data and write to table in overwirte mode..." << std::endl;
+    result = create_batch_arrow_stream(schema, ids_2, names_2, values_2, &write_stream);
+    ASSERT_TRUE(result == 0, "Failed to create Arrow stream");
+    result = lance_overwrite_arrow_stream("users", &write_stream);
     ASSERT_TRUE(result == 0, "Failed to write Arrow stream data");
 
-    // Read data as Arrow stream
-    std::cout << "[cpp]: 6. Reading data as Arrow stream..." << std::endl;
+    std::cout << "[cpp]: << Reading data as Arrow stream..." << std::endl;
     result = lance_read_arrow_stream("users", &read_stream);
     ASSERT_TRUE(result == 0, "Failed to read Arrow stream data");
     display_arrow_stream(&read_stream);
 
-    // Cleanup
+    std::cout << "[cpp]: << Creating stream Arrow data and write to table in append mode..." << std::endl;
+    result = create_customized_arrow_stream(schema, ids_1, names_1, values_1, &write_stream);
+    ASSERT_TRUE(result == 0, "Failed to create Arrow stream");
+    result = lance_append_arrow_stream("users", &write_stream);
+    ASSERT_TRUE(result == 0, "Failed to write Arrow stream data");
+
+    std::cout << "[cpp]: << Reading data as Arrow stream..." << std::endl;
+    result = lance_read_arrow_stream("users", &read_stream);
+    ASSERT_TRUE(result == 0, "Failed to read Arrow stream data");
+    display_arrow_stream(&read_stream);
+
+    std::cout << "[cpp]: << Creating stream Arrow data and write to table in overwrite mode..." << std::endl;
+    result = create_customized_arrow_stream(schema, ids_2, names_2, values_2, &write_stream);
+    ASSERT_TRUE(result == 0, "Failed to create Arrow stream");
+    result = lance_overwrite_arrow_stream("users", &write_stream);
+    ASSERT_TRUE(result == 0, "Failed to write Arrow stream data");
+
+    std::cout << "[cpp]: << Reading data as Arrow stream..." << std::endl;
+    result = lance_read_arrow_stream("users", &read_stream);
+    ASSERT_TRUE(result == 0, "Failed to read Arrow stream data");
+    display_arrow_stream(&read_stream);
+
+    std::cout << "[cpp]: << Cleanup lance resources..." << std::endl;
     lance_cleanup();
 
     return 0;

@@ -3,9 +3,7 @@ use arrow::record_batch::RecordBatchIterator;
 use futures::TryStreamExt;
 use std::sync::Arc;
 
-use crate::{
-    create_sample_schema, record_batch_to_sample_data, sample_data_to_record_batch, SampleData,
-};
+use crate::{create_sample_schema, record_batch_to_sample_data, SampleData};
 use lance::Dataset;
 
 /// Lance table operations for creating, writing, and reading data
@@ -25,6 +23,10 @@ impl LanceTableManager {
 
     /// Open the dataset
     pub async fn open_table(&mut self) -> Result<()> {
+        if self.dataset.is_some() {
+            // Already opened
+            return Ok(());
+        }
         self.dataset = Some(Dataset::open(&self.path).await?);
         Ok(())
     }
@@ -41,29 +43,8 @@ impl LanceTableManager {
         Ok(())
     }
 
-    /// Write data to an existing Lance table using low-level Lance API
-    pub async fn write_from_batch(&mut self, data: &[SampleData]) -> Result<()> {
-        if let Some(dataset) = &mut self.dataset {
-            // Convert sample data to RecordBatch
-            let batch = sample_data_to_record_batch(data)?;
-            let schema = create_sample_schema();
-
-            // Create RecordBatchIterator
-            let batches = RecordBatchIterator::new(vec![Ok(batch)].into_iter(), schema);
-            println!("[rust]: Starting to append data...");
-
-            // Use low-level Lance API to append data
-            dataset.append(batches, None).await?;
-            println!("[rust]: Data appended successfully.");
-        } else {
-            return Err(anyhow::anyhow!("No dataset opened. Call open_table first."));
-        }
-
-        Ok(())
-    }
-
     /// Write data directly from a RecordBatchReader to avoid buffering all data in memory
-    pub async fn write_from_stream(
+    pub async fn append_from_stream(
         &mut self,
         reader: Box<dyn arrow::record_batch::RecordBatchReader + Send + 'static>,
     ) -> Result<()> {
@@ -77,6 +58,32 @@ impl LanceTableManager {
             return Err(anyhow::anyhow!("No dataset opened. Call open_table first."));
         }
 
+        Ok(())
+    }
+
+    /// Overwrite existing table with new data from RecordBatchReader
+    pub async fn overwrite_from_stream(
+        &mut self,
+        reader: Box<dyn arrow::record_batch::RecordBatchReader + Send + 'static>,
+    ) -> Result<()> {
+        // First check if dataset exists and close it
+        if self.dataset.is_some() {
+            self.dataset = None;
+        }
+
+        // Create WriteParams with overwrite mode
+        let write_params = lance::dataset::WriteParams {
+            mode: lance::dataset::WriteMode::Overwrite,
+            ..lance::dataset::WriteParams::default()
+        };
+
+        // Use Lance's built-in overwrite functionality
+        println!("[rust]: Starting to overwrite table with stream data...");
+        Dataset::write(reader, &self.path, Some(write_params)).await?;
+        println!("[rust]: Table overwritten successfully using Lance's built-in overwrite functionality.");
+
+        // Re-open the table
+        self.open_table().await?;
         Ok(())
     }
 

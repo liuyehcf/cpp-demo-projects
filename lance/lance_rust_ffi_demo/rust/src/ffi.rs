@@ -69,7 +69,7 @@ pub extern "C" fn lance_create_table(table_name: *const c_char) -> c_int {
 
 /// Write Arrow stream data to a Lance table using FFI_ArrowArrayStream
 #[no_mangle]
-pub extern "C" fn lance_write_arrow_stream(
+pub extern "C" fn lance_append_arrow_stream(
     table_name: *const c_char,
     stream: *mut FFI_ArrowArrayStream,
 ) -> c_int {
@@ -77,8 +77,7 @@ pub extern "C" fn lance_write_arrow_stream(
     let manager = MANAGER.get().unwrap();
     let table_name_str = unsafe { CStr::from_ptr(table_name).to_str().unwrap() };
 
-    // Create a RecordBatchIterator directly from the FFI stream
-    // This avoids buffering all data in memory
+    // Create a RecordBatchReader directly from the FFI stream
     let stream_reader =
         unsafe { arrow::ffi_stream::ArrowArrayStreamReader::from_raw(&mut *stream).unwrap() };
 
@@ -92,16 +91,55 @@ pub extern "C" fn lance_write_arrow_stream(
     rt.block_on(manager_guard.open_table()).unwrap();
 
     // Use the new method to write directly from the stream without buffering
-    match rt.block_on(manager_guard.write_from_stream(batch_iter)) {
+    match rt.block_on(manager_guard.append_from_stream(batch_iter)) {
         Ok(_) => {
             println!(
-                "[rust]: Arrow stream data written successfully to table '{}'",
+                "[rust]: Arrow stream data append successfully to table '{}'",
                 table_name_str
             );
             0
         }
         Err(e) => {
-            println!("[rust]: Failed to write Arrow stream data: {}", e);
+            println!("[rust]: Failed to append Arrow stream data: {}", e);
+            1
+        }
+    }
+}
+
+/// Overwrite existing table with Arrow stream data using FFI_ArrowArrayStream
+#[no_mangle]
+pub extern "C" fn lance_overwrite_arrow_stream(
+    table_name: *const c_char,
+    stream: *mut FFI_ArrowArrayStream,
+) -> c_int {
+    let rt = RUNTIME.get().unwrap();
+    let manager = MANAGER.get().unwrap();
+    let table_name_str = unsafe { CStr::from_ptr(table_name).to_str().unwrap() };
+
+    // Create a RecordBatchReader directly from the FFI stream
+    let stream_reader =
+        unsafe { arrow::ffi_stream::ArrowArrayStreamReader::from_raw(&mut *stream).unwrap() };
+
+    // ArrowArrayStreamReader already implements RecordBatchReader
+    // and is Send + 'static, so we can directly box it
+    let batch_iter = Box::new(stream_reader) as Box<dyn RecordBatchReader + Send + 'static>;
+
+    let mut manager_guard = manager.lock().unwrap();
+
+    // Open the table first
+    rt.block_on(manager_guard.open_table()).unwrap();
+
+    // Use the new overwrite method to replace the entire table
+    match rt.block_on(manager_guard.overwrite_from_stream(batch_iter)) {
+        Ok(_) => {
+            println!(
+                "[rust]: Arrow stream data overwritten successfully in table '{}'",
+                table_name_str
+            );
+            0
+        }
+        Err(e) => {
+            println!("[rust]: Failed to overwrite Arrow stream data: {}", e);
             1
         }
     }
