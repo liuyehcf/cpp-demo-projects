@@ -15,11 +15,8 @@ int lance_init(const char* db_path);
 // Returns: 0 on success, negative on error
 int lance_create_table(const char* table_name);
 
-// Append Arrow stream data to a Lance table using ArrowArrayStream
-int lance_append_arrow_stream(const char* table_name, struct ArrowArrayStream* stream);
-
-// Overwrite existing table with Arrow stream data using ArrowArrayStream
-int lance_overwrite_arrow_stream(const char* table_name, struct ArrowArrayStream* stream);
+// Write existing table with Arrow stream data using ArrowArrayStream
+int lance_write_arrow_stream(const char* table_name, struct ArrowArrayStream* stream, bool is_overwrite);
 
 // Read data from a Lance table as ArrowArrayStream
 int lance_read_arrow_stream(const char* table_name, struct ArrowArrayStream* stream);

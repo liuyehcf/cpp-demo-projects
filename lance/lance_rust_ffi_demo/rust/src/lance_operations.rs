@@ -43,47 +43,34 @@ impl LanceTableManager {
         Ok(())
     }
 
-    /// Write data directly from a RecordBatchReader to avoid buffering all data in memory
-    pub async fn append_from_stream(
+    /// Write existing table with new data from RecordBatchReader
+    pub async fn write_from_stream(
         &mut self,
         reader: Box<dyn arrow::record_batch::RecordBatchReader + Send + 'static>,
+        is_overwrite: bool,
     ) -> Result<()> {
-        if let Some(dataset) = &mut self.dataset {
-            println!("[rust]: Starting to append data directly from stream...");
-
-            // Use low-level Lance API to append data directly from the reader
-            dataset.append(reader, None).await?;
-            println!("[rust]: Stream data appended successfully.");
-        } else {
-            return Err(anyhow::anyhow!("No dataset opened. Call open_table first."));
-        }
-
-        Ok(())
-    }
-
-    /// Overwrite existing table with new data from RecordBatchReader
-    pub async fn overwrite_from_stream(
-        &mut self,
-        reader: Box<dyn arrow::record_batch::RecordBatchReader + Send + 'static>,
-    ) -> Result<()> {
-        // First check if dataset exists and close it
-        if self.dataset.is_some() {
-            self.dataset = None;
-        }
-
-        // Create WriteParams with overwrite mode
         let write_params = lance::dataset::WriteParams {
-            mode: lance::dataset::WriteMode::Overwrite,
+            mode: if is_overwrite {
+                lance::dataset::WriteMode::Overwrite
+            } else {
+                lance::dataset::WriteMode::Append
+            },
             ..lance::dataset::WriteParams::default()
         };
 
-        // Use Lance's built-in overwrite functionality
-        println!("[rust]: Starting to overwrite table with stream data...");
-        Dataset::write(reader, &self.path, Some(write_params)).await?;
-        println!("[rust]: Table overwritten successfully using Lance's built-in overwrite functionality.");
+        println!("[rust]: Starting to write table with stream data...");
+        Dataset::write(
+            reader,
+            lance::dataset::WriteDestination::Dataset(Arc::new(self.dataset.clone().unwrap())),
+            Some(write_params),
+        )
+        .await?;
+        println!("[rust]: Stream data written successfully.");
 
-        // Re-open the table
-        self.open_table().await?;
+        // Reload the dataset to get the latest version and avoid commit conflicts
+        self.dataset = Some(Dataset::open(&self.path).await?);
+        println!("[rust]: Dataset reloaded after write operation.");
+
         Ok(())
     }
 

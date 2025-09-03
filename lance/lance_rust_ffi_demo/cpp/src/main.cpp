@@ -188,7 +188,7 @@ int main() {
     struct ArrowArrayStream write_stream;
     result = create_batch_arrow_stream(schema, ids_1, names_1, values_1, &write_stream);
     ASSERT_TRUE(result == 0, "Failed to create Arrow stream");
-    result = lance_append_arrow_stream("users", &write_stream);
+    result = lance_write_arrow_stream("users", &write_stream, false);
     ASSERT_TRUE(result == 0, "Failed to write Arrow stream data");
 
     std::cout << "[cpp]: << Reading data as Arrow stream..." << std::endl;
@@ -200,7 +200,7 @@ int main() {
     std::cout << "[cpp]: << Creating batch Arrow data and write to table in overwirte mode..." << std::endl;
     result = create_batch_arrow_stream(schema, ids_2, names_2, values_2, &write_stream);
     ASSERT_TRUE(result == 0, "Failed to create Arrow stream");
-    result = lance_overwrite_arrow_stream("users", &write_stream);
+    result = lance_write_arrow_stream("users", &write_stream, true);
     ASSERT_TRUE(result == 0, "Failed to write Arrow stream data");
 
     std::cout << "[cpp]: << Reading data as Arrow stream..." << std::endl;
@@ -211,7 +211,7 @@ int main() {
     std::cout << "[cpp]: << Creating stream Arrow data and write to table in append mode..." << std::endl;
     result = create_customized_arrow_stream(schema, ids_1, names_1, values_1, &write_stream);
     ASSERT_TRUE(result == 0, "Failed to create Arrow stream");
-    result = lance_append_arrow_stream("users", &write_stream);
+    result = lance_write_arrow_stream("users", &write_stream, false);
     ASSERT_TRUE(result == 0, "Failed to write Arrow stream data");
 
     std::cout << "[cpp]: << Reading data as Arrow stream..." << std::endl;
@@ -222,7 +222,7 @@ int main() {
     std::cout << "[cpp]: << Creating stream Arrow data and write to table in overwrite mode..." << std::endl;
     result = create_customized_arrow_stream(schema, ids_2, names_2, values_2, &write_stream);
     ASSERT_TRUE(result == 0, "Failed to create Arrow stream");
-    result = lance_overwrite_arrow_stream("users", &write_stream);
+    result = lance_write_arrow_stream("users", &write_stream, true);
     ASSERT_TRUE(result == 0, "Failed to write Arrow stream data");
 
     std::cout << "[cpp]: << Reading data as Arrow stream..." << std::endl;
