@@ -16,10 +16,10 @@ int lance_init(const char* db_path);
 int lance_create_table(const char* table_name);
 
 // Write existing table with Arrow stream data using ArrowArrayStream
-int lance_write_arrow_stream(const char* table_name, struct ArrowArrayStream* stream, bool is_overwrite);
+int lance_write_arrow_stream(const char* table_name, struct ArrowArrayStream* stream_addr, bool is_overwrite);
 
 // Read data from a Lance table as ArrowArrayStream
-int lance_read_arrow_stream(const char* table_name, struct ArrowArrayStream* stream);
+int lance_read_arrow_stream(const char* table_name, struct ArrowArrayStream* stream_addr);
 
 // Cleanup resources
 void lance_cleanup();

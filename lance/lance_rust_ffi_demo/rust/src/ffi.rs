@@ -1,5 +1,7 @@
 use crate::{LanceTableManager, SampleData};
 use arrow::{
+    datatypes::SchemaRef,
+    error::ArrowError,
     ffi_stream::FFI_ArrowArrayStream,
     record_batch::{RecordBatchIterator, RecordBatchReader},
 };
@@ -71,25 +73,88 @@ pub extern "C" fn lance_create_table(table_name: *const c_char) -> c_int {
 #[no_mangle]
 pub extern "C" fn lance_write_arrow_stream(
     table_name: *const c_char,
-    stream: *mut FFI_ArrowArrayStream,
+    stream_addr: *mut FFI_ArrowArrayStream,
     is_overwrite: bool,
 ) -> c_int {
     let rt = RUNTIME.get().unwrap();
     let manager = MANAGER.get().unwrap();
     let table_name_str = unsafe { CStr::from_ptr(table_name).to_str().unwrap() };
-
-    // Create a RecordBatchReader directly from the FFI stream
-    let stream_reader =
-        unsafe { arrow::ffi_stream::ArrowArrayStreamReader::from_raw(&mut *stream).unwrap() };
-
-    // ArrowArrayStreamReader already implements RecordBatchReader
-    // and is Send + 'static, so we can directly box it
-    let batch_iter = Box::new(stream_reader) as Box<dyn RecordBatchReader + Send + 'static>;
-
     let mut manager_guard = manager.lock().unwrap();
 
     // Open the table first
     rt.block_on(manager_guard.open_table()).unwrap();
+
+    let stream = unsafe { &mut *(stream_addr as *mut FFI_ArrowArrayStream) };
+
+    // SAFETY: We take ownership of the provided FFI_ArrowArrayStream to create a reader.
+    let stream_reader =
+        match unsafe { arrow::ffi_stream::ArrowArrayStreamReader::from_raw(&mut *stream) } {
+            Ok(reader) => reader,
+            Err(err) => {
+                println!(
+                    "[rust]: Failed to create ArrowArrayStreamReader from FFI stream: {}",
+                    err
+                );
+                return 1;
+            }
+        };
+
+    // Capture schema eagerly to avoid any potential ordering issues with producers
+    // that expect get_schema to be called prior to get_next.
+    let schema: SchemaRef = stream_reader.schema();
+
+    // Owner-thread controlled streaming: All FFI get_next calls occur on a
+    // single dedicated thread. Consumer requests the next batch by sending a
+    // command; this preserves streaming and thread-affinity.
+    use std::sync::mpsc;
+    enum Cmd {
+        Next(mpsc::SyncSender<Option<Result<arrow::record_batch::RecordBatch, ArrowError>>>),
+    }
+    let (cmd_tx, cmd_rx) = mpsc::channel::<Cmd>();
+    std::thread::spawn(move || {
+        let mut reader = stream_reader;
+        loop {
+            match cmd_rx.recv() {
+                Ok(Cmd::Next(resp)) => {
+                    let item = reader.next();
+                    if item.is_none() {
+                        break;
+                    }
+                    let _ = resp.send(item);
+                }
+                Err(_) => break,
+            }
+        }
+        // drop reader here to trigger FFI stream release
+    });
+
+    struct ControlledRecordBatchReader {
+        schema: SchemaRef,
+        tx: mpsc::Sender<Cmd>,
+    }
+
+    impl Iterator for ControlledRecordBatchReader {
+        type Item = Result<arrow::record_batch::RecordBatch, ArrowError>;
+        fn next(&mut self) -> Option<Self::Item> {
+            let (resp_tx, resp_rx) = mpsc::sync_channel(0);
+            if self.tx.send(Cmd::Next(resp_tx)).is_err() {
+                return None;
+            }
+            match resp_rx.recv() {
+                Ok(opt) => opt,
+                Err(_) => None,
+            }
+        }
+    }
+
+    impl RecordBatchReader for ControlledRecordBatchReader {
+        fn schema(&self) -> SchemaRef {
+            self.schema.clone()
+        }
+    }
+
+    let batch_iter: Box<dyn RecordBatchReader + Send + 'static> =
+        Box::new(ControlledRecordBatchReader { schema, tx: cmd_tx });
 
     match rt.block_on(manager_guard.write_from_stream(batch_iter, is_overwrite)) {
         Ok(_) => {
@@ -110,7 +175,7 @@ pub extern "C" fn lance_write_arrow_stream(
 #[no_mangle]
 pub extern "C" fn lance_read_arrow_stream(
     table_name: *const c_char,
-    stream: *mut FFI_ArrowArrayStream,
+    stream_addr: *mut FFI_ArrowArrayStream,
 ) -> c_int {
     let rt = RUNTIME.get().unwrap();
     let manager = MANAGER.get().unwrap();
@@ -138,13 +203,13 @@ pub extern "C" fn lance_read_arrow_stream(
             // Export to FFI_ArrowArrayStream using new method
             unsafe {
                 // First initialize the stream with empty values
-                std::ptr::write(stream, FFI_ArrowArrayStream::empty());
+                std::ptr::write(stream_addr, FFI_ArrowArrayStream::empty());
 
                 // Try to create the stream
                 let new_stream = FFI_ArrowArrayStream::new(Box::new(batch_iter));
 
                 // Properly assign the stream to the pointer
-                std::ptr::write(stream, new_stream);
+                std::ptr::write(stream_addr, new_stream);
             }
             println!(
                 "[rust]: Data read successfully from table '{}' as Arrow stream",
