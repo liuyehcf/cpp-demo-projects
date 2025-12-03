@@ -3,5 +3,6 @@
 ```sh
 cmake -B build
 cmake --build build
-CLASSPATH=build/classes build/jni_signal_handler
+build/coredump_demo 1
+build/coredump_demo 2
 ```
