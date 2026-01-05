@@ -64,8 +64,9 @@ public class ArrowStreamProvider extends ArrowReader {
         root.setRowCount(rowNum);
 
         VectorUnloader unloader = new VectorUnloader(root);
-        ArrowRecordBatch nextBatch = unloader.getRecordBatch();
-        loadRecordBatch(nextBatch);
+        try (ArrowRecordBatch nextBatch = unloader.getRecordBatch()) {
+            loadRecordBatch(nextBatch);
+        }
 
         System.out.println("[java] Write values:");
         for (int i = 0; i < intVector.getValueCount(); i++) {
