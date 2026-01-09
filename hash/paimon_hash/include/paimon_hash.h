@@ -1,4 +1,4 @@
-// inimal C++ implementation of Paimon row hash (Murmur3_32, seed=42)
+// C++ implementation of Paimon row hash (Murmur3_32, seed=42)
 #pragma once
 
 #include <cstddef>
