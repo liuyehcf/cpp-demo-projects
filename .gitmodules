@@ -1,3 +1,6 @@
 [submodule "leveldb/leveldb_demo/contrib/leveldb"]
 	path = leveldb/leveldb_demo/contrib/leveldb
 	url = https://github.com/google/leveldb.git
+[submodule "hash/paimon_hash/contrib/googletest"]
+	path = hash/paimon_hash/contrib/googletest
+	url = https://github.com/google/googletest.git
