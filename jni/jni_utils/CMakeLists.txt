@@ -45,13 +45,13 @@ target_link_libraries(${PROJECT_NAME} PUBLIC jvm)
 
 option(ENABLE_JNI_UTIL_TEST "Whether enable tests" OFF)
 if(ENABLE_JNI_UTIL_TEST)
-    find_package(GTest REQUIRED)
+    add_subdirectory(contrib/googletest)
     file(GLOB TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/test/*.cpp")
     set(TEST_NAME "${PROJECT_NAME}_test")
     add_executable(${TEST_NAME} ${TEST_SOURCES})
     target_link_libraries(${TEST_NAME} PRIVATE ${PROJECT_NAME})
-    target_link_libraries(${TEST_NAME} PRIVATE ${GTEST_LIBRARIES})
-    target_link_libraries(${TEST_NAME} PRIVATE ${GTEST_MAIN_LIBRARIES})
+    target_link_libraries(${TEST_NAME} PRIVATE gtest)
+    target_link_libraries(${TEST_NAME} PRIVATE gtest_main)
 
     file(GLOB_RECURSE TEST_JAVA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/test/java/*.java")
     add_custom_target(build_java
