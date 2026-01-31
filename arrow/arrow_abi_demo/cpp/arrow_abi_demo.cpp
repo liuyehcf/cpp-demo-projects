@@ -107,7 +107,7 @@ void read_data_from_java_side() {
     using namespace jni_utils;
     auto* env = get_env();
     AutoLocalJobject jcls = find_class(env, "org/liuyehcf/ArrowStreamProvider");
-    auto mid = get_mid(env, jcls, "generate", "(J)V", true);
+    auto mid = get_method(env, jcls, "generate", "(J)V", true);
     invoke_static_method(env, jcls, &mid, &stream);
     print_arrow_stream(&stream);
 
@@ -154,7 +154,7 @@ void batch_write_data_to_java_side() {
     using namespace jni_utils;
     auto* env = get_env();
     AutoLocalJobject jcls = find_class(env, "org/liuyehcf/ArrowStreamConsumer");
-    auto mid = get_mid(env, jcls, "consume", "(J)V", true);
+    auto mid = get_method(env, jcls, "consume", "(J)V", true);
     invoke_static_method(env, jcls, &mid, reinterpret_cast<ArrowArrayStream*>(&stream));
 
     if (stream.release) stream.release(&stream);
@@ -229,7 +229,7 @@ void stream_write_data_to_java_side() {
     using namespace jni_utils;
     auto* env = get_env();
     AutoLocalJobject jcls = find_class(env, "org/liuyehcf/ArrowStreamConsumer");
-    auto mid = get_mid(env, jcls, "consume", "(J)V", true);
+    auto mid = get_method(env, jcls, "consume", "(J)V", true);
     invoke_static_method(env, jcls, &mid, reinterpret_cast<ArrowArrayStream*>(&stream));
 
     if (stream.release) stream.release(&stream);

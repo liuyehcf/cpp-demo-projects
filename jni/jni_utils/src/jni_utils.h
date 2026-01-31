@@ -20,8 +20,8 @@ namespace jni_utils {
 #define JDOUBLE 'D'
 
 struct Method {
-    Method(jmethodID mid_, const char* name_, const char* sig_) : mid(mid_), name(name_), sig(sig_) {
-        const char* str = sig;
+    Method(jmethodID jmid_, const char* name_, const char* sig_) : jmid(jmid_), name(name_), signature(sig_) {
+        const char* str = signature;
         while (*str != ')') {
             str++;
         }
@@ -42,17 +42,35 @@ struct Method {
     bool is_return_double() const { return return_type == JDOUBLE; }
     std::string to_string() const;
 
-    const jmethodID mid;
+    const jmethodID jmid;
     const char* const name;
-    const char* const sig;
+    const char* const signature;
     const char return_type = '\0';
 };
 
 // Basic methods
 JNIEnv* get_env();
+
+namespace raw {
+
+jthrowable _find_class(JNIEnv* env, jclass* jcls, const char* class_name);
+jthrowable _find_method_id(JNIEnv* env, jmethodID* jmid, jclass jcls, const char* method_name,
+                           const char* method_signature, bool static_method);
+jthrowable _invoke_object_method(JNIEnv* env, jvalue* jretval, jobject jobj, Method* method...);
+jthrowable _invoke_object_methodV(JNIEnv* env, jvalue* jretval, jobject jobj, Method* method, va_list args);
+jthrowable _invoke_static_method(JNIEnv* env, jvalue* jretval, jclass jcls, Method* method, ...);
+jthrowable _invoke_static_methodV(JNIEnv* env, jvalue* jretval, jclass jcls, Method* method, va_list args);
+jthrowable _invoke_new_object(JNIEnv* env, jobject* jobj, jclass jcls, Method* method, ...);
+jthrowable _invoke_new_objectV(JNIEnv* env, jobject* jobj, jclass jcls, Method* method, va_list args);
+
+std::string _get_exception_message(JNIEnv* env, jthrowable jthr);
+std::string _get_jstack_trace(JNIEnv* env, jthrowable jthr);
+
+}; // namespace raw
+
 jclass find_class(JNIEnv* env, const char* classname);
-Method get_mid(JNIEnv* env, jclass jcls, const char* name, const char* sig, bool is_static);
-jvalue invoke_method(JNIEnv* env, jobject jobj, Method* method, ...);
+Method get_method(JNIEnv* env, jclass jcls, const char* name, const char* sig, bool is_static);
+jvalue invoke_object_method(JNIEnv* env, jobject jobj, Method* method, ...);
 jvalue invoke_static_method(JNIEnv* env, jclass jcls, Method* method, ...);
 jobject invoke_new_object(JNIEnv* env, jclass jcls, Method* method, ...);
 
@@ -76,52 +94,53 @@ template <RefType ref_type>
 class AutoJobject {
 public:
     // NOLINTBEGIN(google-explicit-constructor, google-runtime-int)
-    AutoJobject(jobject obj) : _obj(obj) {}
-    AutoJobject() : _obj(nullptr) {}
+    AutoJobject(jobject jobj) : _jobj(jobj) {}
+    AutoJobject() : _jobj(nullptr) {}
     AutoJobject(const AutoJobject&) = delete;
     AutoJobject(AutoJobject&&) = delete;
     AutoJobject& operator=(const AutoJobject&) = delete;
     AutoJobject& operator=(AutoJobject&&) = delete;
-    AutoJobject& operator=(jobject obj) {
+    AutoJobject& operator=(jobject jobj) {
         release();
-        _obj = obj;
+        _jobj = jobj;
         return *this;
     }
     ~AutoJobject() { release(); }
 
-    jobject get() { return _obj; }
-    operator bool() const { return _obj != nullptr; }
-    operator jobject() const { return _obj; }
-    operator jclass() const { return static_cast<jclass>(_obj); }
-    operator jthrowable() const { return static_cast<jthrowable>(_obj); }
-    operator jstring() const { return static_cast<jstring>(_obj); }
-    operator jarray() const { return static_cast<jarray>(_obj); }
-    operator jbooleanArray() const { return static_cast<jbooleanArray>(_obj); }
-    operator jbyteArray() const { return static_cast<jbyteArray>(_obj); }
-    operator jcharArray() const { return static_cast<jcharArray>(_obj); }
-    operator jshortArray() const { return static_cast<jshortArray>(_obj); }
-    operator jintArray() const { return static_cast<jintArray>(_obj); }
-    operator jlongArray() const { return static_cast<jlongArray>(_obj); }
-    operator jfloatArray() const { return static_cast<jfloatArray>(_obj); }
-    operator jdoubleArray() const { return static_cast<jdoubleArray>(_obj); }
-    operator jobjectArray() const { return static_cast<jobjectArray>(_obj); }
+    void* address() { return &_jobj; }
+    jobject get() { return _jobj; }
+    operator bool() const { return _jobj != nullptr; }
+    operator jobject() const { return _jobj; }
+    operator jclass() const { return static_cast<jclass>(_jobj); }
+    operator jthrowable() const { return static_cast<jthrowable>(_jobj); }
+    operator jstring() const { return static_cast<jstring>(_jobj); }
+    operator jarray() const { return static_cast<jarray>(_jobj); }
+    operator jbooleanArray() const { return static_cast<jbooleanArray>(_jobj); }
+    operator jbyteArray() const { return static_cast<jbyteArray>(_jobj); }
+    operator jcharArray() const { return static_cast<jcharArray>(_jobj); }
+    operator jshortArray() const { return static_cast<jshortArray>(_jobj); }
+    operator jintArray() const { return static_cast<jintArray>(_jobj); }
+    operator jlongArray() const { return static_cast<jlongArray>(_jobj); }
+    operator jfloatArray() const { return static_cast<jfloatArray>(_jobj); }
+    operator jdoubleArray() const { return static_cast<jdoubleArray>(_jobj); }
+    operator jobjectArray() const { return static_cast<jobjectArray>(_jobj); }
     // NOLINTEND(google-explicit-constructor, google-runtime-int)
 
 private:
     void release() {
-        if (_obj == nullptr) {
+        if (_jobj == nullptr) {
             return;
         }
         if constexpr (RefType::LOCAL == ref_type) {
-            get_env()->DeleteLocalRef(_obj);
+            get_env()->DeleteLocalRef(_jobj);
         } else if constexpr (RefType::GLOBAL == ref_type) {
-            get_env()->DeleteGlobalRef(_obj);
+            get_env()->DeleteGlobalRef(_jobj);
         } else if constexpr (RefType::WEAK_GLOBAL == ref_type) {
-            get_env()->DeleteWeakGlobalRef(_obj);
+            get_env()->DeleteWeakGlobalRef(_jobj);
         }
-        _obj = nullptr;
+        _jobj = nullptr;
     }
-    jobject _obj;
+    jobject _jobj;
 };
 
 using AutoLocalJobject = AutoJobject<RefType::LOCAL>;
@@ -147,5 +166,29 @@ public:
 private:
     AutoGlobalJobject _mxbean;
 };
+
+// Concat x and y
+#define TOKEN_CONCAT(x, y) x##y
+// Make sure x and y are fully expanded
+#define TOKEN_CONCAT_FORWARD(x, y) TOKEN_CONCAT(x, y)
+
+#define CHECK_JNI_EXCEPTION(expr, errorMsg)                                        \
+    do {                                                                           \
+        jni_utils::AutoLocalJobject TOKEN_CONCAT_FORWARD(jthr, __LINE__) = (expr); \
+        if ((TOKEN_CONCAT_FORWARD(jthr, __LINE__)).operator bool()) {              \
+            throw std::runtime_error(errorMsg);                                    \
+        }                                                                          \
+    } while (false)
+
+#define THROW_JNI_EXCEPTION(env, expr)                                                                               \
+    do {                                                                                                             \
+        jni_utils::AutoLocalJobject TOKEN_CONCAT_FORWARD(jthr, __LINE__) = (expr);                                   \
+        if ((TOKEN_CONCAT_FORWARD(jthr, __LINE__)).operator bool()) {                                                \
+            throw std::runtime_error(                                                                                \
+                    "Receive JNI exception, message: " +                                                             \
+                    jni_utils::raw::_get_exception_message((env), (TOKEN_CONCAT_FORWARD(jthr, __LINE__))) +          \
+                    ", stack: " + jni_utils::raw::_get_jstack_trace((env), (TOKEN_CONCAT_FORWARD(jthr, __LINE__)))); \
+        }                                                                                                            \
+    } while (false)
 
 } // namespace jni_utils
