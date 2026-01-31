@@ -2,6 +2,7 @@
 
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace jni_utils {
@@ -126,5 +127,25 @@ private:
 using AutoLocalJobject = AutoJobject<RefType::LOCAL>;
 using AutoGlobalJobject = AutoJobject<RefType::GLOBAL>;
 using AutoWeakGlobalJobject = AutoJobject<RefType::WEAK_GLOBAL>;
+
+class MemoryMonitor {
+public:
+    struct MemoryUsage {
+        int64_t init;
+        int64_t used;
+        int64_t committed;
+        int64_t max;
+    };
+    MemoryMonitor();
+    static MemoryMonitor& instance();
+
+    MemoryUsage get_heap_memory_usage();
+    MemoryUsage get_nonheap_memory_usage();
+
+    std::unordered_map<std::string, MemoryUsage> get_pooled_heap_memory_usage();
+
+private:
+    AutoGlobalJobject _mxbean;
+};
 
 } // namespace jni_utils

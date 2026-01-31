@@ -237,3 +237,45 @@ TEST(JNIUtils, vstrs_to_jlstrs) {
 
     jni_utils::invoke_static_method(env, jcls, &m_print, jlist.get());
 }
+
+TEST(JNIUtils, memory_monitor_basic) {
+    auto& mm = jni_utils::MemoryMonitor::instance();
+
+    auto heap = mm.get_heap_memory_usage();
+    auto nonheap = mm.get_nonheap_memory_usage();
+
+    std::cout << "Heap: init=" << heap.init << " used=" << heap.used << " committed=" << heap.committed
+              << " max=" << heap.max << std::endl;
+    std::cout << "NonHeap: init=" << nonheap.init << " used=" << nonheap.used << " committed=" << nonheap.committed
+              << " max=" << nonheap.max << std::endl;
+
+    // Heap assertions
+    ASSERT_GE(heap.used, 0);
+    ASSERT_GE(heap.committed, 0);
+    ASSERT_LE(heap.used, heap.committed);
+    if (heap.max != -1) {
+        ASSERT_LE(heap.committed, heap.max);
+    }
+
+    // Non-heap assertions
+    ASSERT_GE(nonheap.used, 0);
+    ASSERT_GE(nonheap.committed, 0);
+    ASSERT_LE(nonheap.used, nonheap.committed);
+    if (nonheap.max != -1) {
+        ASSERT_LE(nonheap.committed, nonheap.max);
+    }
+
+    // Pooled heap assertions
+    auto pools = mm.get_pooled_heap_memory_usage();
+    for (const auto& kv : pools) {
+        std::cout << "Pool[" << kv.first << "]: init=" << kv.second.init << " used=" << kv.second.used
+                  << " committed=" << kv.second.committed << " max=" << kv.second.max << std::endl;
+        const auto& usage = kv.second;
+        ASSERT_GE(usage.used, 0) << kv.first;
+        ASSERT_GE(usage.committed, 0) << kv.first;
+        ASSERT_LE(usage.used, usage.committed) << kv.first;
+        if (usage.max != -1) {
+            ASSERT_LE(usage.committed, usage.max) << kv.first;
+        }
+    }
+}
