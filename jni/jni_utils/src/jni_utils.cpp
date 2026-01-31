@@ -23,23 +23,19 @@ jclass jcls_hashmap = nullptr;
 static void init_common_classes(JNIEnv* env) {
     {
         jclass jcls = find_class(env, "java/lang/Class");
-        jcls_class = static_cast<jclass>(env->NewGlobalRef(jcls));
-        env->DeleteLocalRef(jcls);
+        jcls_class = jcls;
     }
     {
         jclass jcls = find_class(env, "java/util/List");
-        jcls_list = static_cast<jclass>(env->NewGlobalRef(jcls));
-        env->DeleteLocalRef(jcls);
+        jcls_list = jcls;
     }
     {
         jclass jcls = find_class(env, "java/util/ArrayList");
-        jcls_arraylist = static_cast<jclass>(env->NewGlobalRef(jcls));
-        env->DeleteLocalRef(jcls);
+        jcls_arraylist = jcls;
     }
     {
         jclass jcls = find_class(env, "java/util/HashMap");
-        jcls_hashmap = static_cast<jclass>(env->NewGlobalRef(jcls));
-        env->DeleteLocalRef(jcls);
+        jcls_hashmap = jcls;
     }
 }
 
@@ -93,8 +89,6 @@ static JNIEnv* getGlobalJNIEnv() {
         if (rv != 0) {
             throw std::runtime_error("JNI_CreateJavaVM failed with error: " + std::to_string(rv));
         }
-
-        init_common_classes(jni_env);
     } else {
         vm = vm_buf[0];
         rv = vm->AttachCurrentThread(reinterpret_cast<void**>(&jni_env), nullptr);
@@ -103,6 +97,9 @@ static JNIEnv* getGlobalJNIEnv() {
         }
     }
 
+    // Ensure common classes are initialized exactly once regardless of JVM path
+    static std::once_flag init_once;
+    std::call_once(init_once, [&]() { init_common_classes(jni_env); });
     return jni_env;
 }
 
@@ -486,7 +483,7 @@ jobject vstrs_to_jlstrs(JNIEnv* env, const std::vector<std::string>& vec) {
 
 MemoryMonitor::MemoryMonitor() {
     JNIEnv* env = get_env();
-    AutoLocalJobject jcls_mf = find_class(env, "java/lang/management/ManagementFactory");
+    AutoGlobalJobject jcls_mf = find_class(env, "java/lang/management/ManagementFactory");
     Method m_get_mxbean = get_method(env, jcls_mf, "getMemoryMXBean", "()Ljava/lang/management/MemoryMXBean;", true);
     AutoLocalJobject jmxbean = invoke_static_method(env, jcls_mf, &m_get_mxbean).l;
     _mxbean = env->NewGlobalRef(jmxbean.get());
@@ -499,7 +496,7 @@ MemoryMonitor& MemoryMonitor::instance() {
 
 static MemoryMonitor::MemoryUsage to_memory_usage(JNIEnv* env, jobject jusage) {
     MemoryMonitor::MemoryUsage usage{};
-    AutoLocalJobject jcls_usage = find_class(env, "java/lang/management/MemoryUsage");
+    AutoGlobalJobject jcls_usage = find_class(env, "java/lang/management/MemoryUsage");
     Method m_get_init = get_method(env, jcls_usage, "getInit", "()J", false);
     Method m_get_used = get_method(env, jcls_usage, "getUsed", "()J", false);
     Method m_get_committed = get_method(env, jcls_usage, "getCommitted", "()J", false);
@@ -514,7 +511,7 @@ static MemoryMonitor::MemoryUsage to_memory_usage(JNIEnv* env, jobject jusage) {
 
 MemoryMonitor::MemoryUsage MemoryMonitor::get_heap_memory_usage() {
     JNIEnv* env = get_env();
-    AutoLocalJobject jcls_mx = find_class(env, "java/lang/management/MemoryMXBean");
+    AutoGlobalJobject jcls_mx = find_class(env, "java/lang/management/MemoryMXBean");
     Method m_get_heap = get_method(env, jcls_mx, "getHeapMemoryUsage", "()Ljava/lang/management/MemoryUsage;", false);
     AutoLocalJobject jusage = invoke_object_method(env, _mxbean, &m_get_heap).l;
     return to_memory_usage(env, jusage.get());
@@ -522,7 +519,7 @@ MemoryMonitor::MemoryUsage MemoryMonitor::get_heap_memory_usage() {
 
 MemoryMonitor::MemoryUsage MemoryMonitor::get_nonheap_memory_usage() {
     JNIEnv* env = get_env();
-    AutoLocalJobject jcls_mx = find_class(env, "java/lang/management/MemoryMXBean");
+    AutoGlobalJobject jcls_mx = find_class(env, "java/lang/management/MemoryMXBean");
     Method m_get_nonheap =
             get_method(env, jcls_mx, "getNonHeapMemoryUsage", "()Ljava/lang/management/MemoryUsage;", false);
     AutoLocalJobject jusage = invoke_object_method(env, _mxbean, &m_get_nonheap).l;
@@ -534,7 +531,7 @@ std::unordered_map<std::string, MemoryMonitor::MemoryUsage> MemoryMonitor::get_p
     std::unordered_map<std::string, MemoryMonitor::MemoryUsage> result;
     JNIEnv* env = get_env();
 
-    AutoLocalJobject jcls_mf = find_class(env, "java/lang/management/ManagementFactory");
+    AutoGlobalJobject jcls_mf = find_class(env, "java/lang/management/ManagementFactory");
     Method m_get_pools = get_method(env, jcls_mf, "getMemoryPoolMXBeans", "()Ljava/util/List;", true);
     AutoLocalJobject jlist = invoke_static_method(env, jcls_mf, &m_get_pools).l;
 
@@ -543,13 +540,13 @@ std::unordered_map<std::string, MemoryMonitor::MemoryUsage> MemoryMonitor::get_p
     Method m_get = get_method(env, jcls_list, "get", "(I)Ljava/lang/Object;", false);
 
     // MemoryPoolMXBean APIs
-    AutoLocalJobject jcls_pool = find_class(env, "java/lang/management/MemoryPoolMXBean");
+    AutoGlobalJobject jcls_pool = find_class(env, "java/lang/management/MemoryPoolMXBean");
     Method m_pool_get_type = get_method(env, jcls_pool, "getType", "()Ljava/lang/management/MemoryType;", false);
     Method m_get_name = get_method(env, jcls_pool, "getName", "()Ljava/lang/String;", false);
     Method m_get_usage = get_method(env, jcls_pool, "getUsage", "()Ljava/lang/management/MemoryUsage;", false);
 
     // MemoryType APIs
-    AutoLocalJobject jcls_type = find_class(env, "java/lang/management/MemoryType");
+    AutoGlobalJobject jcls_type = find_class(env, "java/lang/management/MemoryType");
     Method m_type_to_string = get_method(env, jcls_type, "toString", "()Ljava/lang/String;", false);
 
     jint size = invoke_object_method(env, jlist, &m_size).i;

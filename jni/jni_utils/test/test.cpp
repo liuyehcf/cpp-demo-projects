@@ -54,7 +54,7 @@ TEST(JNIUtils, memory_safety) {
 
 TEST(JNIUtils, return_type) {
     JNIEnv* env = jni_utils::get_env();
-    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/MethodReturnType");
+    jni_utils::AutoGlobalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/MethodReturnType");
 
     auto m_ctor = jni_utils::get_method(env, jcls, "<init>", "()V", false);
     jni_utils::AutoLocalJobject jobj = env->NewObject(jcls, m_ctor.jmid);
@@ -96,7 +96,7 @@ TEST(JNIUtils, return_type) {
 
 TEST(JNIUtils, static_return_type) {
     JNIEnv* env = jni_utils::get_env();
-    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/MethodReturnType");
+    jni_utils::AutoGlobalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/MethodReturnType");
 
     jvalue jretval;
     auto m_void = jni_utils::get_method(env, jcls, "staticVoidMethod", "()V", true);
@@ -135,7 +135,7 @@ TEST(JNIUtils, static_return_type) {
 
 TEST(JNIUtils, exception) {
     JNIEnv* env = jni_utils::get_env();
-    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/ThrowException");
+    jni_utils::AutoGlobalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/ThrowException");
 
     auto m_ctor = jni_utils::get_method(env, jcls, "<init>", "()V", false);
     jni_utils::AutoLocalJobject jobj = env->NewObject(jcls, m_ctor.jmid);
@@ -160,7 +160,7 @@ TEST(JNIUtils, exception) {
 
 TEST(JNIUtils, jstring_to_str) {
     JNIEnv* env = jni_utils::get_env();
-    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
+    jni_utils::AutoGlobalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
 
     auto m_get_string = jni_utils::get_method(env, jcls, "getString", "()Ljava/lang/String;", true);
     jvalue jretval = jni_utils::invoke_static_method(env, jcls, &m_get_string);
@@ -172,7 +172,7 @@ TEST(JNIUtils, jstring_to_str) {
 
 TEST(JNIUtils, jbytes_to_str) {
     JNIEnv* env = jni_utils::get_env();
-    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
+    jni_utils::AutoGlobalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
 
     auto m_get_bytes = jni_utils::get_method(env, jcls, "getBytes", "()[B", true);
     jvalue jretval = jni_utils::invoke_static_method(env, jcls, &m_get_bytes);
@@ -184,7 +184,7 @@ TEST(JNIUtils, jbytes_to_str) {
 
 TEST(JNIUtils, new_jbytes) {
     JNIEnv* env = jni_utils::get_env();
-    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
+    jni_utils::AutoGlobalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
 
     auto m_print = jni_utils::get_method(env, jcls, "print", "(Ljava/lang/Object;)V", true);
     std::string str = "Hello, JNI!";
@@ -194,7 +194,7 @@ TEST(JNIUtils, new_jbytes) {
 
 TEST(JNIUtils, get_from_jmap) {
     JNIEnv* env = jni_utils::get_env();
-    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
+    jni_utils::AutoGlobalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
 
     auto m_get_hash_map = jni_utils::get_method(env, jcls, "getHashMap", "()Ljava/util/HashMap;", true);
     jvalue jretval = jni_utils::invoke_static_method(env, jcls, &m_get_hash_map);
@@ -214,7 +214,7 @@ TEST(JNIUtils, get_from_jmap) {
 
 TEST(JNIUtils, map_to_jmap) {
     JNIEnv* env = jni_utils::get_env();
-    jni_utils::AutoLocalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
+    jni_utils::AutoGlobalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/UtilMethods");
 
     auto m_print = jni_utils::get_method(env, jcls, "print", "(Ljava/lang/Object;)V", true);
 

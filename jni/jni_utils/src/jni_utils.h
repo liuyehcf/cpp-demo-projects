@@ -26,7 +26,7 @@ struct Method {
             str++;
         }
         str++;
-        const_cast<char&>(return_type) = *str;
+        return_type = *str;
     }
     bool is_return_ref() const { return return_type == JOBJECT || return_type == JARRAYOBJECT; }
     bool is_return_void() const { return return_type == JVOID; }
@@ -45,7 +45,7 @@ struct Method {
     const jmethodID jmid;
     const char* const name;
     const char* const signature;
-    const char return_type = '\0';
+    char return_type;
 };
 
 // Basic methods

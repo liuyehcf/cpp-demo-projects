@@ -15,7 +15,7 @@ private:
     inline static std::string getMessageFromJava() {
         using namespace jni_utils;
         auto* env = get_env();
-        AutoLocalJobject jcls = find_class(env, "SynchronizedServer");
+        AutoGlobalJobject jcls = find_class(env, "SynchronizedServer");
         auto mid = get_method(env, jcls, "getMessage", "()Ljava/lang/String;", true);
         AutoLocalJobject jstr = static_cast<jstring>(invoke_static_method(env, jcls, &mid).l);
         const char* chars = env->GetStringUTFChars(jstr, nullptr);
