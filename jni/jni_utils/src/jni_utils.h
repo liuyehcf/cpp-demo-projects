@@ -56,7 +56,7 @@ namespace raw {
 jthrowable _find_class(JNIEnv* env, jclass* jcls, const char* class_name);
 jthrowable _find_method_id(JNIEnv* env, jmethodID* jmid, jclass jcls, const char* method_name,
                            const char* method_signature, bool static_method);
-jthrowable _invoke_object_method(JNIEnv* env, jvalue* jretval, jobject jobj, Method* method...);
+jthrowable _invoke_object_method(JNIEnv* env, jvalue* jretval, jobject jobj, Method* method, ...);
 jthrowable _invoke_object_methodV(JNIEnv* env, jvalue* jretval, jobject jobj, Method* method, va_list args);
 jthrowable _invoke_static_method(JNIEnv* env, jvalue* jretval, jclass jcls, Method* method, ...);
 jthrowable _invoke_static_methodV(JNIEnv* env, jvalue* jretval, jclass jcls, Method* method, va_list args);
