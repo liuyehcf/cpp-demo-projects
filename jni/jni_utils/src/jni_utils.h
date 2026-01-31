@@ -82,7 +82,7 @@ jobject invoke_new_object(JNIEnv* env, jclass jcls, Method* method, ...);
 
 // Util methods
 std::string jstr_to_str(JNIEnv* env, jstring jstr);                                 // std::string to java.lang.String
-std::string jbytes_to_str(JNIEnv* env, jbyteArray obj);                             // byte[] to std::string
+std::string jbytes_to_str(JNIEnv* env, jbyteArray jobj);                            // byte[] to std::string
 jobject new_jbytes(JNIEnv* env, const char* data, size_t size);                     // create byte[]
 jobject get_from_jmap(JNIEnv* env, jobject jmap, const std::string& key);           // java.util.Map get method
 jobject map_to_jmap(JNIEnv* env, const std::map<std::string, std::string>& params); // std::map to java.util.Map
@@ -168,7 +168,7 @@ public:
     MemoryUsage get_nonheap_memory_usage();
 
 private:
-    MemoryUsage to_memory_usage(JNIEnv* env, jobject obj_memory_usage);
+    MemoryUsage to_memory_usage(JNIEnv* env, jobject jobj_memory_usage);
 
     AutoGlobalJobject jcls_management_factory;
     AutoGlobalJobject jcls_memory_mxbean;
@@ -182,7 +182,7 @@ private:
     Method m_get_committed;
     Method m_get_max;
 
-    AutoGlobalJobject obj_memory_mxbean;
+    AutoGlobalJobject jobj_memory_mxbean;
 };
 
 // Concat x and y

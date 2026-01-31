@@ -426,11 +426,11 @@ std::string jstr_to_str(JNIEnv* env, jstring jstr) {
     return res;
 }
 
-std::string jbytes_to_str(JNIEnv* env, jbyteArray obj) {
-    jbyte* bytes = env->GetByteArrayElements(obj, nullptr);
-    jsize length = env->GetArrayLength(obj);
+std::string jbytes_to_str(JNIEnv* env, jbyteArray jobj) {
+    jbyte* bytes = env->GetByteArrayElements(jobj, nullptr);
+    jsize length = env->GetArrayLength(jobj);
     std::string result(reinterpret_cast<char*>(bytes), length);
-    env->ReleaseByteArrayElements(obj, bytes, JNI_ABORT);
+    env->ReleaseByteArrayElements(jobj, bytes, JNI_ABORT);
     return result;
 }
 
@@ -488,7 +488,7 @@ MemoryMonitor::MemoryMonitor() {
 
         jvalue return_val = invoke_static_method(env, jcls_management_factory, &m_get_memory_mxbean);
         AutoLocalJobject jmxbean = return_val.l;
-        obj_memory_mxbean = env->NewGlobalRef(jmxbean.get());
+        jobj_memory_mxbean = env->NewGlobalRef(jmxbean.get());
     }
 
     {
@@ -515,13 +515,13 @@ MemoryMonitor& MemoryMonitor::instance() {
     return inst;
 }
 
-MemoryMonitor::MemoryUsage MemoryMonitor::to_memory_usage(JNIEnv* env, jobject obj_memory_usage) {
+MemoryMonitor::MemoryUsage MemoryMonitor::to_memory_usage(JNIEnv* env, jobject jobj_memory_usage) {
     MemoryMonitor::MemoryUsage usage{};
 
-    usage.init = invoke_object_method(env, obj_memory_usage, &m_get_init).j;
-    usage.used = invoke_object_method(env, obj_memory_usage, &m_get_used).j;
-    usage.committed = invoke_object_method(env, obj_memory_usage, &m_get_committed).j;
-    usage.max = invoke_object_method(env, obj_memory_usage, &m_get_max).j;
+    usage.init = invoke_object_method(env, jobj_memory_usage, &m_get_init).j;
+    usage.used = invoke_object_method(env, jobj_memory_usage, &m_get_used).j;
+    usage.committed = invoke_object_method(env, jobj_memory_usage, &m_get_committed).j;
+    usage.max = invoke_object_method(env, jobj_memory_usage, &m_get_max).j;
 
     return usage;
 }
@@ -529,15 +529,15 @@ MemoryMonitor::MemoryUsage MemoryMonitor::to_memory_usage(JNIEnv* env, jobject o
 MemoryMonitor::MemoryUsage MemoryMonitor::get_heap_memory_usage() {
     JNIEnv* env = get_env();
 
-    AutoLocalJobject obj_memory_usage = invoke_object_method(env, obj_memory_mxbean, &m_get_heap_memory_usage).l;
-    return to_memory_usage(env, obj_memory_usage.get());
+    AutoLocalJobject jobj_memory_usage = invoke_object_method(env, jobj_memory_mxbean, &m_get_heap_memory_usage).l;
+    return to_memory_usage(env, jobj_memory_usage.get());
 }
 
 MemoryMonitor::MemoryUsage MemoryMonitor::get_nonheap_memory_usage() {
     JNIEnv* env = get_env();
 
-    AutoLocalJobject obj_memory_usage = invoke_object_method(env, obj_memory_mxbean, &m_get_non_heap_memory_usage).l;
-    return to_memory_usage(env, obj_memory_usage.get());
+    AutoLocalJobject jobj_memory_usage = invoke_object_method(env, jobj_memory_mxbean, &m_get_non_heap_memory_usage).l;
+    return to_memory_usage(env, jobj_memory_usage.get());
 }
 
 } // namespace jni_utils
