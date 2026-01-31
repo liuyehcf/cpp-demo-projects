@@ -20,7 +20,8 @@ namespace jni_utils {
 #define JDOUBLE 'D'
 
 struct Method {
-    Method(jmethodID jmid_, const char* name_, const char* sig_) : jmid(jmid_), name(name_), signature(sig_) {
+    Method(jmethodID jmid_, const char* name_, const char* signature_)
+            : jmid(jmid_), name(name_), signature(signature_) {
         const char* str = signature;
         while (*str != ')') {
             str++;
@@ -28,6 +29,11 @@ struct Method {
         str++;
         return_type = *str;
     }
+    Method() = default;
+    Method(const Method&) = default;
+    Method& operator=(const Method&) = default;
+    ~Method() = default;
+
     bool is_return_ref() const { return return_type == JOBJECT || return_type == JARRAYOBJECT; }
     bool is_return_void() const { return return_type == JVOID; }
     bool is_return_object() const { return return_type == JOBJECT; }
@@ -42,10 +48,10 @@ struct Method {
     bool is_return_double() const { return return_type == JDOUBLE; }
     std::string to_string() const;
 
-    const jmethodID jmid;
-    const char* const name;
-    const char* const signature;
-    char return_type;
+    jmethodID jmid = nullptr;
+    const char* name = nullptr;
+    const char* signature = nullptr;
+    char return_type = '\0';
 };
 
 // Basic methods
@@ -68,8 +74,8 @@ std::string _get_jstack_trace(JNIEnv* env, jthrowable jthr);
 
 }; // namespace raw
 
-jclass find_class(JNIEnv* env, const char* classname);
-Method get_method(JNIEnv* env, jclass jcls, const char* name, const char* sig, bool is_static);
+jclass find_class(JNIEnv* env, const char* class_name);
+Method get_method(JNIEnv* env, jclass jcls, const char* method_name, const char* method_signature, bool is_static);
 jvalue invoke_object_method(JNIEnv* env, jobject jobj, Method* method, ...);
 jvalue invoke_static_method(JNIEnv* env, jclass jcls, Method* method, ...);
 jobject invoke_new_object(JNIEnv* env, jclass jcls, Method* method, ...);
@@ -161,10 +167,22 @@ public:
     MemoryUsage get_heap_memory_usage();
     MemoryUsage get_nonheap_memory_usage();
 
-    std::unordered_map<std::string, MemoryUsage> get_pooled_heap_memory_usage();
-
 private:
-    AutoGlobalJobject _mxbean;
+    MemoryUsage to_memory_usage(JNIEnv* env, jobject obj_memory_usage);
+
+    AutoGlobalJobject jcls_management_factory;
+    AutoGlobalJobject jcls_memory_mxbean;
+    AutoGlobalJobject jcls_memory_usage;
+
+    Method m_get_memory_mxbean;
+    Method m_get_heap_memory_usage;
+    Method m_get_non_heap_memory_usage;
+    Method m_get_init;
+    Method m_get_used;
+    Method m_get_committed;
+    Method m_get_max;
+
+    AutoGlobalJobject obj_memory_mxbean;
 };
 
 // Concat x and y

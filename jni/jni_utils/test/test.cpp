@@ -264,18 +264,4 @@ TEST(JNIUtils, memory_monitor_basic) {
     if (nonheap.max != -1) {
         ASSERT_LE(nonheap.committed, nonheap.max);
     }
-
-    // Pooled heap assertions
-    auto pools = mm.get_pooled_heap_memory_usage();
-    for (const auto& kv : pools) {
-        std::cout << "Pool[" << kv.first << "]: init=" << kv.second.init << " used=" << kv.second.used
-                  << " committed=" << kv.second.committed << " max=" << kv.second.max << std::endl;
-        const auto& usage = kv.second;
-        ASSERT_GE(usage.used, 0) << kv.first;
-        ASSERT_GE(usage.committed, 0) << kv.first;
-        ASSERT_LE(usage.used, usage.committed) << kv.first;
-        if (usage.max != -1) {
-            ASSERT_LE(usage.committed, usage.max) << kv.first;
-        }
-    }
 }

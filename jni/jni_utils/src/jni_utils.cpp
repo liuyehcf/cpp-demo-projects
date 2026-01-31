@@ -328,17 +328,17 @@ std::string _get_jstack_trace(JNIEnv* env, jthrowable jthr) {
 }
 } // namespace raw
 
-jclass find_class(JNIEnv* env, const char* classname) {
+jclass find_class(JNIEnv* env, const char* class_name) {
     jclass jcls = nullptr;
-    CHECK_JNI_EXCEPTION(raw::_find_class(env, &jcls, classname), "Cannot find class " + std::string(classname));
+    CHECK_JNI_EXCEPTION(raw::_find_class(env, &jcls, class_name), "Cannot find class " + std::string(class_name));
     return jcls;
 }
 
-Method get_method(JNIEnv* env, jclass jcls, const char* name, const char* sig, bool is_static) {
+Method get_method(JNIEnv* env, jclass jcls, const char* method_name, const char* method_signature, bool is_static) {
     jmethodID jmid = nullptr;
-    CHECK_JNI_EXCEPTION(raw::_find_method_id(env, &jmid, jcls, name, sig, is_static),
-                        "Cannot find method " + std::string(name));
-    return {jmid, name, sig};
+    CHECK_JNI_EXCEPTION(raw::_find_method_id(env, &jmid, jcls, method_name, method_signature, is_static),
+                        "Cannot find method " + std::string(method_name));
+    return {jmid, method_name, method_signature};
 }
 
 jvalue invoke_object_method(JNIEnv* env, jobject jobj, Method* method, ...) {
@@ -441,8 +441,7 @@ jobject new_jbytes(JNIEnv* env, const char* data, size_t size) {
 }
 
 jobject get_from_jmap(JNIEnv* env, jobject jmap, const std::string& key) {
-    const char* signature_get = "(Ljava/lang/Object;)Ljava/lang/Object;";
-    Method m_get = get_method(env, jcls_hashmap, "get", signature_get, false);
+    Method m_get = get_method(env, jcls_hashmap, "get", "(Ljava/lang/Object;)Ljava/lang/Object;", false);
 
     AutoLocalJobject jstr_key = env->NewStringUTF(key.c_str());
     jvalue jretval = invoke_object_method(env, jmap, &m_get, jstr_key.get());
@@ -450,10 +449,9 @@ jobject get_from_jmap(JNIEnv* env, jobject jmap, const std::string& key) {
 }
 
 jobject map_to_jmap(JNIEnv* env, const std::map<std::string, std::string>& params) {
-    const char* signature_ctor = "()V";
-    const char* signature_put = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;";
-    Method m_ctor = get_method(env, jcls_hashmap, "<init>", signature_ctor, false);
-    Method m_put = get_method(env, jcls_hashmap, "put", signature_put, false);
+    Method m_ctor = get_method(env, jcls_hashmap, "<init>", "()V", false);
+    Method m_put =
+            get_method(env, jcls_hashmap, "put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
 
     jobject jmap = invoke_new_object(env, jcls_hashmap, &m_ctor);
     for (const auto& entry : params) {
@@ -466,10 +464,8 @@ jobject map_to_jmap(JNIEnv* env, const std::map<std::string, std::string>& param
 }
 
 jobject vstrs_to_jlstrs(JNIEnv* env, const std::vector<std::string>& vec) {
-    const char* signature_ctor = "()V";
-    const char* signature_add = "(Ljava/lang/Object;)Z";
-    Method m_ctor = get_method(env, jcls_arraylist, "<init>", signature_ctor, false);
-    Method m_add = get_method(env, jcls_arraylist, "add", signature_add, false);
+    Method m_ctor = get_method(env, jcls_arraylist, "<init>", "()V", false);
+    Method m_add = get_method(env, jcls_arraylist, "add", "(Ljava/lang/Object;)Z", false);
 
     jobject jlist = invoke_new_object(env, jcls_arraylist, &m_ctor);
 
@@ -483,10 +479,35 @@ jobject vstrs_to_jlstrs(JNIEnv* env, const std::vector<std::string>& vec) {
 
 MemoryMonitor::MemoryMonitor() {
     JNIEnv* env = get_env();
-    AutoGlobalJobject jcls_mf = find_class(env, "java/lang/management/ManagementFactory");
-    Method m_get_mxbean = get_method(env, jcls_mf, "getMemoryMXBean", "()Ljava/lang/management/MemoryMXBean;", true);
-    AutoLocalJobject jmxbean = invoke_static_method(env, jcls_mf, &m_get_mxbean).l;
-    _mxbean = env->NewGlobalRef(jmxbean.get());
+
+    {
+        jcls_management_factory = find_class(env, "java/lang/management/ManagementFactory");
+
+        m_get_memory_mxbean = get_method(env, jcls_management_factory, "getMemoryMXBean",
+                                         "()Ljava/lang/management/MemoryMXBean;", true);
+
+        jvalue return_val = invoke_static_method(env, jcls_management_factory, &m_get_memory_mxbean);
+        AutoLocalJobject jmxbean = return_val.l;
+        obj_memory_mxbean = env->NewGlobalRef(jmxbean.get());
+    }
+
+    {
+        jcls_memory_mxbean = find_class(env, "java/lang/management/MemoryMXBean");
+
+        m_get_heap_memory_usage = get_method(env, jcls_memory_mxbean, "getHeapMemoryUsage",
+                                             "()Ljava/lang/management/MemoryUsage;", false);
+        m_get_non_heap_memory_usage = get_method(env, jcls_memory_mxbean, "getNonHeapMemoryUsage",
+                                                 "()Ljava/lang/management/MemoryUsage;", false);
+    }
+
+    {
+        jcls_memory_usage = find_class(env, "java/lang/management/MemoryUsage");
+
+        m_get_init = get_method(env, jcls_memory_usage, "getInit", "()J", false);
+        m_get_used = get_method(env, jcls_memory_usage, "getUsed", "()J", false);
+        m_get_committed = get_method(env, jcls_memory_usage, "getCommitted", "()J", false);
+        m_get_max = get_method(env, jcls_memory_usage, "getMax", "()J", false);
+    }
 }
 
 MemoryMonitor& MemoryMonitor::instance() {
@@ -494,76 +515,29 @@ MemoryMonitor& MemoryMonitor::instance() {
     return inst;
 }
 
-static MemoryMonitor::MemoryUsage to_memory_usage(JNIEnv* env, jobject jusage) {
+MemoryMonitor::MemoryUsage MemoryMonitor::to_memory_usage(JNIEnv* env, jobject obj_memory_usage) {
     MemoryMonitor::MemoryUsage usage{};
-    AutoGlobalJobject jcls_usage = find_class(env, "java/lang/management/MemoryUsage");
-    Method m_get_init = get_method(env, jcls_usage, "getInit", "()J", false);
-    Method m_get_used = get_method(env, jcls_usage, "getUsed", "()J", false);
-    Method m_get_committed = get_method(env, jcls_usage, "getCommitted", "()J", false);
-    Method m_get_max = get_method(env, jcls_usage, "getMax", "()J", false);
 
-    usage.init = invoke_object_method(env, jusage, &m_get_init).j;
-    usage.used = invoke_object_method(env, jusage, &m_get_used).j;
-    usage.committed = invoke_object_method(env, jusage, &m_get_committed).j;
-    usage.max = invoke_object_method(env, jusage, &m_get_max).j;
+    usage.init = invoke_object_method(env, obj_memory_usage, &m_get_init).j;
+    usage.used = invoke_object_method(env, obj_memory_usage, &m_get_used).j;
+    usage.committed = invoke_object_method(env, obj_memory_usage, &m_get_committed).j;
+    usage.max = invoke_object_method(env, obj_memory_usage, &m_get_max).j;
+
     return usage;
 }
 
 MemoryMonitor::MemoryUsage MemoryMonitor::get_heap_memory_usage() {
     JNIEnv* env = get_env();
-    AutoGlobalJobject jcls_mx = find_class(env, "java/lang/management/MemoryMXBean");
-    Method m_get_heap = get_method(env, jcls_mx, "getHeapMemoryUsage", "()Ljava/lang/management/MemoryUsage;", false);
-    AutoLocalJobject jusage = invoke_object_method(env, _mxbean, &m_get_heap).l;
-    return to_memory_usage(env, jusage.get());
+
+    AutoLocalJobject obj_memory_usage = invoke_object_method(env, obj_memory_mxbean, &m_get_heap_memory_usage).l;
+    return to_memory_usage(env, obj_memory_usage.get());
 }
 
 MemoryMonitor::MemoryUsage MemoryMonitor::get_nonheap_memory_usage() {
     JNIEnv* env = get_env();
-    AutoGlobalJobject jcls_mx = find_class(env, "java/lang/management/MemoryMXBean");
-    Method m_get_nonheap =
-            get_method(env, jcls_mx, "getNonHeapMemoryUsage", "()Ljava/lang/management/MemoryUsage;", false);
-    AutoLocalJobject jusage = invoke_object_method(env, _mxbean, &m_get_nonheap).l;
-    return to_memory_usage(env, jusage.get());
-}
 
-std::unordered_map<std::string, MemoryMonitor::MemoryUsage> MemoryMonitor::get_pooled_heap_memory_usage() {
-    // Fetch pools from ManagementFactory each call (avoid storing in non-movable vector)
-    std::unordered_map<std::string, MemoryMonitor::MemoryUsage> result;
-    JNIEnv* env = get_env();
-
-    AutoGlobalJobject jcls_mf = find_class(env, "java/lang/management/ManagementFactory");
-    Method m_get_pools = get_method(env, jcls_mf, "getMemoryPoolMXBeans", "()Ljava/util/List;", true);
-    AutoLocalJobject jlist = invoke_static_method(env, jcls_mf, &m_get_pools).l;
-
-    // List APIs
-    Method m_size = get_method(env, jcls_list, "size", "()I", false);
-    Method m_get = get_method(env, jcls_list, "get", "(I)Ljava/lang/Object;", false);
-
-    // MemoryPoolMXBean APIs
-    AutoGlobalJobject jcls_pool = find_class(env, "java/lang/management/MemoryPoolMXBean");
-    Method m_pool_get_type = get_method(env, jcls_pool, "getType", "()Ljava/lang/management/MemoryType;", false);
-    Method m_get_name = get_method(env, jcls_pool, "getName", "()Ljava/lang/String;", false);
-    Method m_get_usage = get_method(env, jcls_pool, "getUsage", "()Ljava/lang/management/MemoryUsage;", false);
-
-    // MemoryType APIs
-    AutoGlobalJobject jcls_type = find_class(env, "java/lang/management/MemoryType");
-    Method m_type_to_string = get_method(env, jcls_type, "toString", "()Ljava/lang/String;", false);
-
-    jint size = invoke_object_method(env, jlist, &m_size).i;
-    for (jint i = 0; i < size; ++i) {
-        AutoLocalJobject jpool = invoke_object_method(env, jlist, &m_get, i).l;
-        AutoLocalJobject jtype = invoke_object_method(env, jpool, &m_pool_get_type).l;
-        AutoLocalJobject jtype_str = invoke_object_method(env, jtype, &m_type_to_string).l;
-        std::string type_str = jstr_to_str(env, static_cast<jstring>(jtype_str.get()));
-        if (type_str == "HEAP") {
-            AutoLocalJobject jname = invoke_object_method(env, jpool, &m_get_name).l;
-            std::string name = jstr_to_str(env, static_cast<jstring>(jname.get()));
-            AutoLocalJobject jusage = invoke_object_method(env, jpool, &m_get_usage).l;
-            result.emplace(name, to_memory_usage(env, jusage.get()));
-        }
-    }
-
-    return result;
+    AutoLocalJobject obj_memory_usage = invoke_object_method(env, obj_memory_mxbean, &m_get_non_heap_memory_usage).l;
+    return to_memory_usage(env, obj_memory_usage.get());
 }
 
 } // namespace jni_utils
