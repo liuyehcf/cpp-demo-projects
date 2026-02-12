@@ -7,11 +7,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 add_compile_options(-O3 -Wall)
 
-file(GLOB MY_PROJECT_SOURCES "*.cpp")
+file(GLOB MY_PROJECT_SOURCES CONFIGURE_DEPENDS "*.cpp")
 add_executable(${PROJECT_NAME} ${MY_PROJECT_SOURCES})
 
 target_compile_options(${PROJECT_NAME} PRIVATE -static-libstdc++)
 target_link_options(${PROJECT_NAME} PRIVATE -static-libstdc++)
 
-find_package(Poco REQUIRED COMPONENTS Foundation Net XML)
+add_subdirectory(${CMAKE_SOURCE_DIR}/contrib/poco ${CMAKE_BINARY_DIR}/poco)
 target_link_libraries(${PROJECT_NAME} Poco::Foundation Poco::Net Poco::XML)
