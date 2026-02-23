@@ -1,11 +1,13 @@
 #include <cxxabi.h>
 #include <dlfcn.h>
 #include <libunwind.h>
+#include <ucontext.h>
 
 #include <array>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -15,7 +17,8 @@ enum class UWN_MODE {
     UNW_INIT_LOCAL_2,
     UNW_BACKTRACE,
 };
-UWN_MODE unw_mode;
+static UWN_MODE unw_mode;
+static thread_local ucontext_t* g_last_ucontext = nullptr;
 
 void print_symbol(const char* sym, const unw_word_t& pc, const unw_word_t& offset) {
     int status;
@@ -100,10 +103,12 @@ void print_stacktrace_with_unw_init_local2() {
     unw_context_t context;
 
     // Initialize context to the current machine state using unw_init_local2.
-    unw_getcontext(&context);
-    // No special flags; use 0 for default behavior.
-    unw_init_local2(&cursor, &context, 0);
-
+    if (g_last_ucontext) {
+        unw_init_local2(&cursor, reinterpret_cast<unw_context_t*>(g_last_ucontext), UNW_INIT_SIGNAL_FRAME);
+    } else {
+        unw_getcontext(&context);
+        unw_init_local2(&cursor, &context, 0);
+    }
     while (unw_step(&cursor) > 0) {
         unw_word_t offset, pc;
         char sym[256];
@@ -147,8 +152,8 @@ void print_stacktrace_unw_backtrace() {
     }
 }
 
-// Signal handler function
-void signal_handler(int sig_num) {
+void signal_handler(int sig_num, siginfo_t* /*info*/, void* uctx) {
+    g_last_ucontext = reinterpret_cast<ucontext_t*>(uctx);
     std::cerr << "Caught signal " << sig_num << ": " << strsignal(sig_num) << std::endl;
     switch (unw_mode) {
     case UWN_MODE::UNW_INIT_LOCAL:
@@ -170,29 +175,70 @@ void signal_handler(int sig_num) {
     raise(sig_num);
 }
 
-struct Item {};
+__attribute__((naked, noinline)) static void fault_site_naked() {
+#if defined(__x86_64__)
+    __asm__ __volatile__("xorl %ebp, %ebp; ud2");
+#else
+    __builtin_trap();
+#endif
+}
 
-class ItemHolder {
-public:
-    virtual Item* get_item() { return item.get(); }
-
-private:
-    std::shared_ptr<Item> item;
-};
-
-// Function that will cause a segmentation fault
-void cause_segfault(std::shared_ptr<ItemHolder> holder, int depth) {
+__attribute__((noinline)) void cause_segfault(int depth) {
     if (depth <= 0) {
-        holder->get_item();
+        // Method 1: Directly execute an invalid instruction (naked function)
+        // fault_site_naked();
+
+        // Method 2: Dereference a null pointer
+        volatile int* p = (int*)0;
+        *p = 1;
     } else {
-        cause_segfault(holder, depth - 1);
+        cause_segfault(depth - 1);
     }
+}
+
+void install_handler_legacy() {
+    auto legacy_signal_handler = +[](int sig_num) { signal_handler(sig_num, nullptr, nullptr); };
+    signal(SIGSEGV, legacy_signal_handler);
+    signal(SIGABRT, legacy_signal_handler);
+    signal(SIGILL, legacy_signal_handler);
+    signal(SIGFPE, legacy_signal_handler);
+}
+
+void install_handlers_normal() {
+    struct sigaction sa = {};
+    sa.sa_sigaction = &signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, nullptr);
+    sigaction(SIGABRT, &sa, nullptr);
+    sigaction(SIGILL, &sa, nullptr);
+    sigaction(SIGFPE, &sa, nullptr);
+}
+
+void install_handlers_on_altstack() {
+    // sigaltstack provides an alternate stack for signal handlers so they can
+    // run safely even if the normal thread stack is overflowed or corrupted.
+    const size_t alt_sz = SIGSTKSZ;
+    static std::unique_ptr<char[]> alt_mem(new char[alt_sz]);
+    stack_t ss{};
+    ss.ss_sp = alt_mem.get();
+    ss.ss_size = alt_sz;
+    ss.ss_flags = 0;
+    sigaltstack(&ss, nullptr);
+
+    struct sigaction sa = {};
+    sa.sa_sigaction = &signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_ONSTACK | SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, nullptr);
+    sigaction(SIGABRT, &sa, nullptr);
+    sigaction(SIGILL, &sa, nullptr);
+    sigaction(SIGFPE, &sa, nullptr);
 }
 
 int main(int argc, char* argv[]) {
     const char* unw_mode_str = std::getenv("UNW_MODE");
     if (!unw_mode_str) unw_mode_str = "";
-
     if (std::strcmp(unw_mode_str, "unw_init_local") == 0)
         unw_mode = UWN_MODE::UNW_INIT_LOCAL;
     else if (std::strcmp(unw_mode_str, "unw_init_local2") == 0)
@@ -206,13 +252,21 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    // Register signal handlers
-    signal(SIGSEGV, signal_handler);
-    signal(SIGABRT, signal_handler);
-    signal(SIGILL, signal_handler);
-    signal(SIGFPE, signal_handler);
+    const char* handler_mode_str = std::getenv("HANDLER_MODE");
+    if (!handler_mode_str) handler_mode_str = "";
+    if (std::strcmp(handler_mode_str, "legacy") == 0)
+        install_handler_legacy();
+    else if (std::strcmp(handler_mode_str, "altstack") == 0)
+        install_handlers_on_altstack();
+    else if (std::strcmp(handler_mode_str, "normal") == 0)
+        install_handlers_normal();
+    else {
+        std::cerr << "Invalid HANDLER_MODE value: '" << handler_mode_str << "'" << std::endl;
+        std::cerr << "Please set env 'HANDLER_MODE=legacy', 'HANDLER_MODE=normal' or 'HANDLER_MODE=altstack'"
+                  << std::endl;
+        return EXIT_FAILURE;
+    }
 
-    cause_segfault({}, 10);
-
+    cause_segfault(10);
     return 0;
 }

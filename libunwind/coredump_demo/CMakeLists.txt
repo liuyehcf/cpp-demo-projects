@@ -28,7 +28,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${UNWIND_INCLUDE_DIR})
 #    undefined reference to `_Ux86_64_get_reg'
 #    undefined reference to `_Ux86_64_get_proc_name'
 #    undefined reference to `_Ux86_64_step'
-target_compile_options(${PROJECT_NAME} PRIVATE -DUNW_LOCAL_ONLY -g -ggdb)
+target_compile_options(${PROJECT_NAME} PRIVATE -DUNW_LOCAL_ONLY -O3 -g -ggdb -fno-omit-frame-pointer -fasynchronous-unwind-tables -fno-optimize-sibling-calls)
 # -rdynamic exports executable symbols so dladdr() and backtrace can resolve them.
 target_link_options(${PROJECT_NAME} PRIVATE -rdynamic)
 target_link_libraries(${PROJECT_NAME} PRIVATE ${ALL_LIBS})
