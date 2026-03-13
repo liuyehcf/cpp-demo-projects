@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
         // config.proxyPort = 3128;
         // config.proxyScheme = Http::Scheme::HTTP;
 
-        S3Client s3_client(config);
+        S3Client s3_client(credentials, nullptr, config);
 
         String s3Uri = "YOUR_S3_FILE_PATH";
         String bucket, key;
