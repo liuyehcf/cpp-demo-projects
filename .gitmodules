@@ -10,3 +10,6 @@
 [submodule "contrib/aws-sdk-cpp"]
 	path = contrib/aws-sdk-cpp
 	url = https://github.com/aws/aws-sdk-cpp.git
+[submodule "contrib/arrow"]
+	path = contrib/arrow
+	url = https://github.com/apache/arrow.git
