@@ -18,6 +18,32 @@ find_package(Arrow REQUIRED)
 add_subdirectory(${CMAKE_SOURCE_DIR}/../../jni/jni_utils ${CMAKE_BINARY_DIR}/jni_utils_build)
 
 find_program(MAVEN_EXECUTABLE mvn)
+find_program(JAVA_EXECUTABLE java)
+
+if(NOT JAVA_EXECUTABLE)
+    message(FATAL_ERROR "Java executable not found. Please install Java 17 or newer.")
+endif()
+
+execute_process(
+    COMMAND ${JAVA_EXECUTABLE} -version
+    OUTPUT_VARIABLE JAVA_VERSION_OUTPUT
+    ERROR_VARIABLE JAVA_VERSION_OUTPUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_STRIP_TRAILING_WHITESPACE
+)
+
+string(REGEX MATCH "\"([0-9]+)(\\.[^\"]*)?\"" JAVA_VERSION_MATCH "${JAVA_VERSION_OUTPUT}")
+
+if(NOT JAVA_VERSION_MATCH)
+    message(FATAL_ERROR "Failed to parse Java version from output: ${JAVA_VERSION_OUTPUT}")
+endif()
+
+set(JAVA_MAJOR_VERSION ${CMAKE_MATCH_1})
+
+if(JAVA_MAJOR_VERSION LESS 17)
+    message(FATAL_ERROR "Java 17 or newer is required, but found Java ${JAVA_MAJOR_VERSION}. Full version output: ${JAVA_VERSION_OUTPUT}")
+endif()
+
 set(JAVA_PROJECT_DIR ${CMAKE_SOURCE_DIR}/java)
 set(JAVA_OUTPUT_DIR ${CMAKE_BINARY_DIR}/lib/jar)
 set(JAR_NAME test-arrow-abi-jar-with-dependencies.jar)
@@ -49,7 +75,7 @@ add_custom_command(TARGET build_java POST_BUILD
 )
 
 file(GLOB PROJECT_SOURCE ${CMAKE_SOURCE_DIR}/cpp/*.cpp)
-add_executable(${PROJECT_NAME} ${PROJECT_SOURCE} ${PROTO_SOURCE})
+add_executable(${PROJECT_NAME} ${PROJECT_SOURCE})
 
 target_compile_options(${PROJECT_NAME} PRIVATE -static-libstdc++)
 target_link_options(${PROJECT_NAME} PRIVATE -static-libstdc++)
