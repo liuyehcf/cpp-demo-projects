@@ -18,9 +18,20 @@ namespace {
 
 constexpr char kOutputFile[] = "parquet_with_bloom_filter.parquet";
 constexpr int kRowGroupCount = 4;
-constexpr int kRowsPerRowGroup = 8;
+constexpr int kRowsPerRowGroup = 3;
+constexpr int kBoundaryRowsPerRowGroup = 2;
+constexpr int kBaseRowsPerRowGroup = kRowsPerRowGroup - kBoundaryRowsPerRowGroup;
 constexpr int kDecimalScale = 2;
 constexpr int kDecimalPrecision = 12;
+
+constexpr int32_t kSharedIntLowerBound = -100;
+constexpr int32_t kSharedIntUpperBound = 100;
+constexpr double kSharedDoubleLowerBound = -100.0;
+constexpr double kSharedDoubleUpperBound = 100.0;
+constexpr char kSharedDecimalLowerBound[] = "-100.00";
+constexpr char kSharedDecimalUpperBound[] = "100.00";
+constexpr char kSharedStringLowerBound[] = "aaa_shared_low";
+constexpr char kSharedStringUpperBound[] = "zzz_shared_high";
 
 #define THROW_NOT_OK(expr)                                                               \
     do {                                                                                 \
@@ -56,6 +67,17 @@ arrow::Decimal128 DecimalValueForRowGroup(int row_group) {
     return value;
 }
 
+arrow::Decimal128 DecimalValueFromText(const std::string& text) {
+    arrow::Decimal128 value;
+    int32_t parsed_precision = 0;
+    int32_t parsed_scale = 0;
+    THROW_NOT_OK(arrow::Decimal128::FromString(text, &value, &parsed_precision, &parsed_scale));
+    if (parsed_scale != kDecimalScale || parsed_precision > kDecimalPrecision) {
+        throw std::runtime_error("unexpected decimal precision/scale");
+    }
+    return value;
+}
+
 std::shared_ptr<arrow::Array> FinishArray(arrow::ArrayBuilder* builder) {
     std::shared_ptr<arrow::Array> array;
     THROW_NOT_OK(builder->Finish(&array));
@@ -68,21 +90,42 @@ std::shared_ptr<arrow::Table> BuildDemoTable() {
     arrow::Decimal128Builder decimal_builder(arrow::decimal128(kDecimalPrecision, kDecimalScale));
     arrow::StringBuilder string_builder;
 
+    if (kBaseRowsPerRowGroup <= 0) {
+        throw std::runtime_error("kRowsPerRowGroup must be greater than boundary rows");
+    }
+
+    const arrow::Decimal128 shared_decimal_lower_bound = DecimalValueFromText(kSharedDecimalLowerBound);
+    const arrow::Decimal128 shared_decimal_upper_bound = DecimalValueFromText(kSharedDecimalUpperBound);
+
     for (int row_group = 0; row_group < kRowGroupCount; ++row_group) {
         const int32_t int_value = row_group + 1;
         const double double_value = (row_group + 1) * 1.25;
         const arrow::Decimal128 decimal_value = DecimalValueForRowGroup(row_group);
         const std::string string_value = "str_rg_" + std::to_string(row_group + 1);
 
-        // Key point: for each column, a predicate value appears in only one row group.
-        // For example, int_col=1 appears only in row group 0, and double_col=2.5
-        // appears only in row group 1.
-        for (int row = 0; row < kRowsPerRowGroup; ++row) {
+        // Key point:
+        // 1. Each row group still has its own "business" value per column, so equality predicates
+        //    such as int_col=1 or string_col='str_rg_3' only exist in one row group.
+        // 2. Every row group also gets the same lower/upper boundary value for every column,
+        //    making min/max statistics overlap across all row groups. This prevents external
+        //    readers from safely skipping row groups via statistics alone, so bloom filters
+        //    become the main skipping mechanism for those unique equality predicates.
+        for (int row = 0; row < kBaseRowsPerRowGroup; ++row) {
             THROW_NOT_OK(int_builder.Append(int_value));
             THROW_NOT_OK(double_builder.Append(double_value));
             THROW_NOT_OK(decimal_builder.Append(decimal_value));
             THROW_NOT_OK(string_builder.Append(string_value));
         }
+
+        THROW_NOT_OK(int_builder.Append(kSharedIntLowerBound));
+        THROW_NOT_OK(double_builder.Append(kSharedDoubleLowerBound));
+        THROW_NOT_OK(decimal_builder.Append(shared_decimal_lower_bound));
+        THROW_NOT_OK(string_builder.Append(kSharedStringLowerBound));
+
+        THROW_NOT_OK(int_builder.Append(kSharedIntUpperBound));
+        THROW_NOT_OK(double_builder.Append(kSharedDoubleUpperBound));
+        THROW_NOT_OK(decimal_builder.Append(shared_decimal_upper_bound));
+        THROW_NOT_OK(string_builder.Append(kSharedStringUpperBound));
     }
 
     auto schema = arrow::schema({arrow::field("int_col", arrow::int32()), arrow::field("double_col", arrow::float64()),
@@ -94,7 +137,7 @@ std::shared_ptr<arrow::Table> BuildDemoTable() {
 
 parquet::BloomFilterOptions MakeBloomFilterOptions() {
     parquet::BloomFilterOptions options;
-    options.ndv = kRowsPerRowGroup;
+    options.ndv = 3;
     options.fpp = 0.001;
     options.fold = false;
     return options;
