@@ -16,7 +16,6 @@
 
 namespace {
 
-constexpr char kOutputFile[] = "parquet_with_bloom_filter.parquet";
 constexpr int kRowGroupCount = 4;
 constexpr int kRowsPerRowGroup = 3;
 constexpr int kBoundaryRowsPerRowGroup = 2;
@@ -143,11 +142,18 @@ parquet::BloomFilterOptions MakeBloomFilterOptions() {
     return options;
 }
 
-void PrintNativeBloomFilterSummary() {
-    auto parquet_reader = parquet::ParquetFileReader::OpenFile(kOutputFile, false);
+std::string ParseOutputFile(int argc, char** argv) {
+    if (argc != 2) {
+        throw std::runtime_error("usage: ParquetWithBloomFilterWriter <parquet-file>");
+    }
+    return argv[1];
+}
+
+void PrintNativeBloomFilterSummary(const std::string& output_file) {
+    auto parquet_reader = parquet::ParquetFileReader::OpenFile(output_file, false);
     const auto metadata = parquet_reader->metadata();
 
-    std::cout << "Verified native bloom filter metadata in " << kOutputFile << ":\n";
+    std::cout << "Verified native bloom filter metadata in " << output_file << ":\n";
     for (int row_group = 0; row_group < metadata->num_row_groups(); ++row_group) {
         const auto row_group_metadata = metadata->RowGroup(row_group);
         for (int column_index = 0; column_index < metadata->num_columns(); ++column_index) {
@@ -168,11 +174,11 @@ void PrintNativeBloomFilterSummary() {
     }
 }
 
-void WriteDemoParquetFile() {
+void WriteDemoParquetFile(const std::string& output_file) {
     const auto table = BuildDemoTable();
 
     std::shared_ptr<arrow::io::FileOutputStream> outfile;
-    ASSIGN_OR_THROW(outfile, arrow::io::FileOutputStream::Open(kOutputFile));
+    ASSIGN_OR_THROW(outfile, arrow::io::FileOutputStream::Open(output_file));
 
     const parquet::BloomFilterOptions bloom_filter_options = MakeBloomFilterOptions();
     parquet::WriterProperties::Builder builder;
@@ -194,16 +200,16 @@ void WriteDemoParquetFile() {
     THROW_NOT_OK(writer->WriteTable(*table, kRowsPerRowGroup));
     THROW_NOT_OK(writer->Close());
 
-    std::cout << "Wrote " << kOutputFile << " with " << kRowGroupCount
+    std::cout << "Wrote " << output_file << " with " << kRowGroupCount
               << " row groups and native Parquet bloom filters for int/double/decimal/string columns.\n";
-    PrintNativeBloomFilterSummary();
+    PrintNativeBloomFilterSummary(output_file);
 }
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
     try {
-        WriteDemoParquetFile();
+        WriteDemoParquetFile(ParseOutputFile(argc, argv));
         return EXIT_SUCCESS;
     } catch (const std::exception& ex) {
         std::cerr << "writer failed: " << ex.what() << '\n';

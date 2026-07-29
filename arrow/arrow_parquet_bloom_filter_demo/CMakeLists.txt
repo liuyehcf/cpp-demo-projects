@@ -39,11 +39,17 @@ add_executable(ParquetWithBloomFilterWriter
 add_executable(ParquetWithBloomFilterReader
     ${CMAKE_SOURCE_DIR}/cpp/ParquetWithBloomFilterReader.cpp)
 
+add_executable(ParquetBloomFilterInspector
+    ${CMAKE_SOURCE_DIR}/cpp/ParquetBloomFilterInspector.cpp)
+
 target_compile_options(ParquetWithBloomFilterWriter PRIVATE -static-libstdc++)
 target_link_options(ParquetWithBloomFilterWriter PRIVATE -static-libstdc++)
 
 target_compile_options(ParquetWithBloomFilterReader PRIVATE -static-libstdc++)
 target_link_options(ParquetWithBloomFilterReader PRIVATE -static-libstdc++)
+
+target_compile_options(ParquetBloomFilterInspector PRIVATE -static-libstdc++)
+target_link_options(ParquetBloomFilterInspector PRIVATE -static-libstdc++)
 
 target_include_directories(ParquetWithBloomFilterWriter PRIVATE
     ${ARROW_CPP_SOURCE_DIR}/src
@@ -53,8 +59,15 @@ target_include_directories(ParquetWithBloomFilterReader PRIVATE
     ${ARROW_CPP_SOURCE_DIR}/src
     ${ARROW_CPP_BINARY_DIR}/src)
 
+target_include_directories(ParquetBloomFilterInspector PRIVATE
+    ${ARROW_CPP_SOURCE_DIR}/src
+    ${ARROW_CPP_BINARY_DIR}/src)
+
 target_link_libraries(ParquetWithBloomFilterWriter PRIVATE parquet_static arrow_static)
 # target_link_libraries(ParquetWithBloomFilterWriter PRIVATE parquet_shared arrow_shared)
 
 target_link_libraries(ParquetWithBloomFilterReader PRIVATE parquet_static arrow_static)
 # target_link_libraries(ParquetWithBloomFilterReader PRIVATE parquet_shared arrow_shared)
+
+target_link_libraries(ParquetBloomFilterInspector PRIVATE parquet_static arrow_static)
+# target_link_libraries(ParquetBloomFilterInspector PRIVATE parquet_shared arrow_shared)

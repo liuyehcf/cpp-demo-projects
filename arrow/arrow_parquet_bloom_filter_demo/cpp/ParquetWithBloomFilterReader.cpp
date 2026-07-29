@@ -20,7 +20,6 @@
 
 namespace {
 
-constexpr char kInputFile[] = "parquet_with_bloom_filter.parquet";
 constexpr int kDecimalScale = 2;
 
 #define THROW_NOT_OK(expr)                                                               \
@@ -36,16 +35,22 @@ struct Predicate {
     std::string literal;
 };
 
-Predicate ParsePredicate(int argc, char** argv) {
-    if (argc != 2) {
-        throw std::runtime_error("usage: ParquetWithBloomFilterReader <column=value>, e.g. int_col=1");
+struct Options {
+    std::string parquet_file;
+    Predicate predicate;
+};
+
+Options ParseOptions(int argc, char** argv) {
+    if (argc != 3) {
+        throw std::runtime_error(
+                "usage: ParquetWithBloomFilterReader <parquet-file> <column=value>, e.g. demo.parquet int_col=1");
     }
-    const std::string arg = argv[1];
+    const std::string arg = argv[2];
     const size_t pos = arg.find('=');
     if (pos == std::string::npos || pos == 0 || pos + 1 >= arg.size()) {
         throw std::runtime_error("predicate must be in the form column=value");
     }
-    return {arg.substr(0, pos), arg.substr(pos + 1)};
+    return {argv[1], {arg.substr(0, pos), arg.substr(pos + 1)}};
 }
 
 bool BloomMayContain(const parquet::BloomFilter& bloom_filter, const parquet::ColumnDescriptor& column,
@@ -151,9 +156,9 @@ std::vector<int> FilterRowGroups(parquet::ParquetFileReader* parquet_reader, con
     return selected;
 }
 
-void ReadSelectedRowGroups(const std::vector<int>& row_groups) {
+void ReadSelectedRowGroups(const std::string& input_file, const std::vector<int>& row_groups) {
     parquet::arrow::FileReaderBuilder builder;
-    THROW_NOT_OK(builder.OpenFile(kInputFile));
+    THROW_NOT_OK(builder.OpenFile(input_file));
     std::unique_ptr<parquet::arrow::FileReader> reader;
     THROW_NOT_OK(builder.Build(&reader));
 
@@ -164,9 +169,10 @@ void ReadSelectedRowGroups(const std::vector<int>& row_groups) {
 }
 
 void Run(int argc, char** argv) {
-    const Predicate predicate = ParsePredicate(argc, argv);
+    const Options options = ParseOptions(argc, argv);
+    const Predicate& predicate = options.predicate;
 
-    auto parquet_reader = parquet::ParquetFileReader::OpenFile(kInputFile, false);
+    auto parquet_reader = parquet::ParquetFileReader::OpenFile(options.parquet_file, false);
     const std::vector<int> row_groups = FilterRowGroups(parquet_reader.get(), predicate);
 
     if (row_groups.empty()) {
@@ -175,7 +181,7 @@ void Run(int argc, char** argv) {
         return;
     }
 
-    ReadSelectedRowGroups(row_groups);
+    ReadSelectedRowGroups(options.parquet_file, row_groups);
 }
 
 } // namespace
