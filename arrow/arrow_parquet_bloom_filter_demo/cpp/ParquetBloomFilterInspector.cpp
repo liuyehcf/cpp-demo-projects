@@ -135,10 +135,8 @@ void PrintText(const std::string& parquet_file, const parquet::FileMetaData& met
 
             std::cout << column_chunk->path_in_schema()->ToDotString();
             if (offset.has_value()) {
-                std::cout << " (offset=" << *offset;
-                if (length.has_value()) {
-                    std::cout << ", length=" << *length;
-                }
+                std::cout << " (offset=" << *offset << ", length=";
+                PrintOptionalInt64(length);
                 std::cout << ')';
             }
             std::cout << '\n';
