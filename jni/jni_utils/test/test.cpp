@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <jni_utils.h>
 
+#include <chrono>
 #include <iostream>
 #include <thread>
 
@@ -276,4 +277,101 @@ TEST(JNIUtils, memory_monitor_basic) {
 
     mm.trigger_gc();
     std::cout << "GC: triggered" << std::endl;
+}
+
+TEST(JNIUtils, thread_local_cleanup_after_native_thread_exit) {
+    JNIEnv* env = jni_utils::get_env();
+    jni_utils::AutoGlobalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/ThreadLocalCleanup");
+
+    auto m_cache_resource = jni_utils::get_method(env, jcls, "cacheResource", "()V", true);
+    auto m_get_cleanup_count = jni_utils::get_method(env, jcls, "getCleanupCount", "()I", true);
+    auto m_is_resource_alive = jni_utils::get_method(env, jcls, "isResourceAlive", "()Z", true);
+    auto m_is_thread_reachable = jni_utils::get_method(env, jcls, "isThreadReachable", "()Z", true);
+
+    jclass cleanup_class = static_cast<jclass>(jcls.get());
+    std::thread worker([cleanup_class, m_cache_resource]() mutable {
+        JNIEnv* worker_env = jni_utils::get_env();
+        jni_utils::invoke_static_method(worker_env, cleanup_class, &m_cache_resource);
+        // Deliberately do not call ThreadLocal.remove() or DetachCurrentThread().
+    });
+    worker.join();
+
+    bool resource_alive = jni_utils::invoke_static_method(env, jcls, &m_is_resource_alive).z;
+    bool thread_reachable = jni_utils::invoke_static_method(env, jcls, &m_is_thread_reachable).z;
+    std::cout << "After native thread exit: resource_alive=" << resource_alive
+              << " thread_reachable=" << thread_reachable << std::endl;
+
+    jni_utils::MemoryMonitor::instance().trigger_gc();
+    std::cout << "C++ triggered JVM GC" << std::endl;
+
+    jint cleanup_count = 0;
+    for (size_t i = 0; i < 100; ++i) {
+        cleanup_count = jni_utils::invoke_static_method(env, jcls, &m_get_cleanup_count).i;
+        if (cleanup_count > 0) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    resource_alive = jni_utils::invoke_static_method(env, jcls, &m_is_resource_alive).z;
+    thread_reachable = jni_utils::invoke_static_method(env, jcls, &m_is_thread_reachable).z;
+    std::cout << "After GC: cleanup_count=" << cleanup_count << " resource_alive=" << resource_alive
+              << " thread_reachable=" << thread_reachable << std::endl;
+    std::cout << "ThreadLocal cleanup result: " << (cleanup_count > 0 && !resource_alive ? "cleaned" : "not cleaned")
+              << std::endl;
+}
+
+TEST(JNIUtils, thread_local_cleanup_after_detach) {
+    JNIEnv* env = jni_utils::get_env();
+    jni_utils::AutoGlobalJobject jcls = jni_utils::find_class(env, "org/liuyehcf/jni/ThreadLocalCleanup");
+
+    auto m_cache_resource = jni_utils::get_method(env, jcls, "cacheResource", "()V", true);
+    auto m_get_cleanup_count = jni_utils::get_method(env, jcls, "getCleanupCount", "()I", true);
+    auto m_is_resource_alive = jni_utils::get_method(env, jcls, "isResourceAlive", "()Z", true);
+    auto m_is_thread_reachable = jni_utils::get_method(env, jcls, "isThreadReachable", "()Z", true);
+
+    const jint cleanup_count_before = jni_utils::invoke_static_method(env, jcls, &m_get_cleanup_count).i;
+    jint detach_result = JNI_ERR;
+    jclass cleanup_class = static_cast<jclass>(jcls.get());
+    std::thread worker([cleanup_class, m_cache_resource, &detach_result]() mutable {
+        JNIEnv* worker_env = jni_utils::get_env();
+        JavaVM* vm = nullptr;
+        jint get_vm_result = worker_env->GetJavaVM(&vm);
+        if (get_vm_result == JNI_OK) {
+            jni_utils::invoke_static_method(worker_env, cleanup_class, &m_cache_resource);
+            detach_result = vm->DetachCurrentThread();
+        } else {
+            detach_result = get_vm_result;
+        }
+    });
+    worker.join();
+
+    std::cout << "DetachCurrentThread result: " << detach_result << std::endl;
+    bool resource_alive = jni_utils::invoke_static_method(env, jcls, &m_is_resource_alive).z;
+    bool thread_reachable = jni_utils::invoke_static_method(env, jcls, &m_is_thread_reachable).z;
+    std::cout << "After detach and native thread exit: resource_alive=" << resource_alive
+              << " thread_reachable=" << thread_reachable << std::endl;
+
+    jni_utils::MemoryMonitor::instance().trigger_gc();
+    std::cout << "C++ triggered JVM GC after detach" << std::endl;
+
+    jint cleanup_count = cleanup_count_before;
+    for (size_t i = 0; i < 100; ++i) {
+        cleanup_count = jni_utils::invoke_static_method(env, jcls, &m_get_cleanup_count).i;
+        if (cleanup_count > cleanup_count_before) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    resource_alive = jni_utils::invoke_static_method(env, jcls, &m_is_resource_alive).z;
+    thread_reachable = jni_utils::invoke_static_method(env, jcls, &m_is_thread_reachable).z;
+    std::cout << "After GC: cleanup_count_before=" << cleanup_count_before << " cleanup_count=" << cleanup_count
+              << " resource_alive=" << resource_alive << " thread_reachable=" << thread_reachable << std::endl;
+    std::cout << "ThreadLocal cleanup after detach result: "
+              << (cleanup_count > cleanup_count_before && !resource_alive ? "cleaned" : "not cleaned") << std::endl;
+
+    EXPECT_EQ(detach_result, JNI_OK);
+    EXPECT_GT(cleanup_count, cleanup_count_before);
+    EXPECT_FALSE(resource_alive);
 }
