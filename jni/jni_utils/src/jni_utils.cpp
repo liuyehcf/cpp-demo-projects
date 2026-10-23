@@ -1,8 +1,10 @@
 #include <jni_utils.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -16,28 +18,24 @@ static constexpr auto OPT_CLASSPATH = "-Djava.class.path=";
 static constexpr auto JVM_ARGS = "JNI_OPS";
 
 jclass jcls_class = nullptr;
+jclass jcls_string = nullptr;
 jclass jcls_list = nullptr;
 jclass jcls_arraylist = nullptr;
+jclass jcls_map = nullptr;
 jclass jcls_hashmap = nullptr;
+jclass jcls_out_of_memory_error = nullptr;
 
 static void init_common_classes(JNIEnv* env) {
-    {
-        jclass jcls = find_class(env, "java/lang/Class");
-        jcls_class = jcls;
-    }
-    {
-        jclass jcls = find_class(env, "java/util/List");
-        jcls_list = jcls;
-    }
-    {
-        jclass jcls = find_class(env, "java/util/ArrayList");
-        jcls_arraylist = jcls;
-    }
-    {
-        jclass jcls = find_class(env, "java/util/HashMap");
-        jcls_hashmap = jcls;
-    }
+    if (!jcls_class) jcls_class = find_class(env, "java/lang/Class");
+    if (!jcls_string) jcls_string = find_class(env, "java/lang/String");
+    if (!jcls_list) jcls_list = find_class(env, "java/util/List");
+    if (!jcls_arraylist) jcls_arraylist = find_class(env, "java/util/ArrayList");
+    if (!jcls_map) jcls_map = find_class(env, "java/util/Map");
+    if (!jcls_hashmap) jcls_hashmap = find_class(env, "java/util/HashMap");
+    if (!jcls_out_of_memory_error) jcls_out_of_memory_error = find_class(env, "java/lang/OutOfMemoryError");
 }
+
+static std::mutex jni_global_mutex;
 
 static JNIEnv* getGlobalJNIEnv() {
     static constexpr auto VM_BUF_LENGTH = 1;
@@ -89,6 +87,7 @@ static JNIEnv* getGlobalJNIEnv() {
         if (rv != 0) {
             throw std::runtime_error("JNI_CreateJavaVM failed with error: " + std::to_string(rv));
         }
+        init_common_classes(jni_env);
     } else {
         vm = vm_buf[0];
         rv = vm->AttachCurrentThread(reinterpret_cast<void**>(&jni_env), nullptr);
@@ -97,21 +96,70 @@ static JNIEnv* getGlobalJNIEnv() {
         }
     }
 
-    // Ensure common classes are initialized exactly once regardless of JVM path
-    static std::once_flag init_once;
-    std::call_once(init_once, [&]() { init_common_classes(jni_env); });
     return jni_env;
 }
 
 static thread_local JNIEnv* tls_env = nullptr;
 JNIEnv* get_env() {
-    static std::mutex init_mutex;
     if (tls_env == nullptr) {
-        std::lock_guard lock(init_mutex);
+        std::lock_guard lock(jni_global_mutex);
         tls_env = getGlobalJNIEnv();
+        if (tls_env == nullptr) {
+            throw std::runtime_error("Failed to get JNIEnv for unknown reason");
+        }
     }
     return tls_env;
 }
+
+bool is_jvm_created() {
+    static std::atomic<bool> jvm_created = false;
+    if (!jvm_created) {
+        std::lock_guard lock(jni_global_mutex);
+        if (!jvm_created) {
+            static constexpr auto VM_BUF_LENGTH = 1;
+            JavaVM* vm_buf[VM_BUF_LENGTH];
+            jint num_vms = 0;
+            jint rv = JNI_GetCreatedJavaVMs(&vm_buf[0], VM_BUF_LENGTH, &num_vms);
+            if (rv != 0) {
+                throw std::runtime_error("JNI_GetCreatedJavaVMs failed with error: " + std::to_string(rv));
+            }
+            jvm_created = num_vms > 0;
+        }
+    }
+    return jvm_created;
+}
+
+namespace {
+
+void throw_if_jni_call_failed(JNIEnv* env, const char* operation) {
+    jthrowable exception = env->ExceptionOccurred();
+    if (!exception) return;
+
+    // Keep this path allocation-light because it is also used for Java heap allocation failures.
+    env->ExceptionClear();
+    env->DeleteLocalRef(exception);
+    throw std::runtime_error(std::string(operation) + " failed with a Java exception");
+}
+
+void throw_if_jni_exception_pending(JNIEnv* env, const char* operation) {
+    jthrowable exception = env->ExceptionOccurred();
+    if (!exception) return;
+
+    env->ExceptionClear();
+    env->DeleteLocalRef(exception);
+    throw std::runtime_error(std::string("Pending Java exception before ") + operation);
+}
+
+template <typename T>
+T ensure_jni_result(JNIEnv* env, T result, const char* operation) {
+    throw_if_jni_call_failed(env, operation);
+    if (!result) {
+        throw std::runtime_error(std::string(operation) + " returned null");
+    }
+    return result;
+}
+
+} // namespace
 
 namespace raw {
 
@@ -248,85 +296,110 @@ jthrowable _invoke_new_objectV(JNIEnv* env, jobject* jobj, jclass jcls, Method* 
 }
 
 std::string _get_exception_message(JNIEnv* env, jthrowable jthr) {
-    AutoLocalJobject jcls_execption = env->GetObjectClass(jthr);
-    jmethodID jmid_get_message;
-    const char* method_name_get_message = "getMessage";
-    const char* signature_get_message = "()Ljava/lang/String;";
-    if (_find_method_id(env, &jmid_get_message, jcls_execption, method_name_get_message, signature_get_message, false))
-        return "Cannot find getMessage method";
-
-    Method m_get_message = {jmid_get_message, method_name_get_message, signature_get_message};
-
-    jvalue jretval;
-    if (AutoLocalJobject jthr_get_message = _invoke_object_method(env, &jretval, jthr, &m_get_message);
-        jthr_get_message)
-        return "Failed to get exception message";
-
-    AutoLocalJobject jstr = jretval.l;
-    return jstr_to_str(env, jstr);
+    return get_exception_summary(env, jthr);
 }
 
 std::string _get_jstack_trace(JNIEnv* env, jthrowable jthr) {
-    // public static String getStackTrace(Throwable throwable) {
-    //     StringWriter sw = new StringWriter();
-    //     PrintWriter pw = new PrintWriter(sw, true);
-    //     throwable.printStackTrace(pw);
-    //     return sw.getBuffer().toString();
-    // }
-    AutoLocalJobject jcls_execption = env->GetObjectClass(jthr);
-    AutoLocalJobject jcls_sw;
-    if (raw::_find_class(env, static_cast<jclass*>(jcls_sw.address()), "java/io/StringWriter"))
-        return "Cannot find StringWriter class";
-    jmethodID jmid_sw_ctor;
-    if (raw::_find_method_id(env, &jmid_sw_ctor, jcls_sw, "<init>", "()V", false))
-        return "Cannot find StringWriter constructor";
-    Method m_sw_ctor = {jmid_sw_ctor, "<init>", "()V"};
-    AutoLocalJobject jobj_sw;
-    if (raw::_invoke_new_object(env, reinterpret_cast<jobject*>(jobj_sw.address()), jcls_sw, &m_sw_ctor))
-        return "Failed to create StringWriter instance";
-
-    AutoLocalJobject jcls_pw;
-    if (raw::_find_class(env, static_cast<jclass*>(jcls_pw.address()), "java/io/PrintWriter"))
-        return "Cannot find PrintWriter class";
-    jmethodID jmid_pw_ctor;
-    if (raw::_find_method_id(env, &jmid_pw_ctor, jcls_pw, "<init>", "(Ljava/io/Writer;)V", false))
-        return "Cannot find PrintWriter constructor";
-    Method m_pw_ctor = {jmid_pw_ctor, "<init>", "(Ljava/io/Writer;)V"};
-    AutoLocalJobject jobj_pw;
-    if (raw::_invoke_new_object(env, reinterpret_cast<jobject*>(jobj_pw.address()), jcls_pw, &m_pw_ctor, jobj_sw.get()))
-        return "Failed to create PrintWriter instance";
-
-    AutoLocalJobject jcls_thr = env->GetObjectClass(jthr);
-    jmethodID jmid_print_stack_trace;
-    if (raw::_find_method_id(env, &jmid_print_stack_trace, jcls_thr, "printStackTrace", "(Ljava/io/PrintWriter;)V",
-                             false))
-        return "Cannot find printStackTrace method";
-    Method m_print_stack_trace = {jmid_print_stack_trace, "printStackTrace", "(Ljava/io/PrintWriter;)V"};
-    {
-        jvalue jretval;
-        if (raw::_invoke_object_method(env, &jretval, jthr, &m_print_stack_trace, jobj_pw.get()))
-            return "Failed to invoke printStackTrace method";
-    }
-
-    jmethodID jmid_to_string;
-    if (raw::_find_method_id(env, &jmid_to_string, jcls_sw, "toString", "()Ljava/lang/String;", false))
-        return "Cannot find toString method of StringWriter";
-    Method m_to_string = {jmid_to_string, "toString", "()Ljava/lang/String;"};
-    AutoLocalJobject jstr_stack_strace;
-    {
-        jvalue jretval;
-        if (raw::_invoke_object_method(env, &jretval, jobj_sw, &m_to_string))
-            return "Failed to invoke toString method of StringWriter";
-        jstr_stack_strace = jretval.l;
-    }
-
-    const char* stack_strace = env->GetStringUTFChars(jstr_stack_strace, nullptr);
-    std::string str_stack_strace(stack_strace);
-    env->ReleaseStringUTFChars(jstr_stack_strace, stack_strace);
-
-    return str_stack_strace;
+    return get_stack_trace(env, jthr);
 }
 } // namespace raw
+
+std::string get_exception_summary(JNIEnv* env, jthrowable jthr) {
+    AutoLocalJobject jcls_exception = env->GetObjectClass(jthr);
+    if (!jcls_exception) {
+        env->ExceptionClear();
+        return "Failed to get exception class";
+    }
+
+    jmethodID jmid_get_message;
+    const char* signature_get_message = "()Ljava/lang/String;";
+    if (raw::_find_method_id(env, &jmid_get_message, jcls_exception, "getMessage", signature_get_message, false)) {
+        return "Cannot find getMessage method";
+    }
+
+    Method m_get_message = {jmid_get_message, "getMessage", signature_get_message};
+    jvalue jretval;
+    if (AutoLocalJobject jthr_get_message = raw::_invoke_object_method(env, &jretval, jthr, &m_get_message);
+        jthr_get_message) {
+        return "Failed to get exception message";
+    }
+
+    AutoLocalJobject jstr = jretval.l;
+    try {
+        return jstr_to_str(env, jstr);
+    } catch (...) {
+        return "Failed to convert exception message";
+    }
+}
+
+std::string get_stack_trace(JNIEnv* env, jthrowable jthr) {
+    // Equivalent to ExceptionUtils.getStackTrace(), implemented with JDK classes so this
+    // standalone utility does not need the commons-lang3 runtime dependency.
+    try {
+        AutoGlobalJobject jcls_sw;
+        if (raw::_find_class(env, static_cast<jclass*>(jcls_sw.address()), "java/io/StringWriter")) {
+            return "Cannot find StringWriter class";
+        }
+        jmethodID jmid_sw_ctor;
+        if (raw::_find_method_id(env, &jmid_sw_ctor, jcls_sw, "<init>", "()V", false)) {
+            return "Cannot find StringWriter constructor";
+        }
+        Method m_sw_ctor = {jmid_sw_ctor, "<init>", "()V"};
+        AutoLocalJobject jobj_sw;
+        if (raw::_invoke_new_object(env, reinterpret_cast<jobject*>(jobj_sw.address()), jcls_sw, &m_sw_ctor)) {
+            return "Failed to create StringWriter instance";
+        }
+
+        AutoGlobalJobject jcls_pw;
+        if (raw::_find_class(env, static_cast<jclass*>(jcls_pw.address()), "java/io/PrintWriter")) {
+            return "Cannot find PrintWriter class";
+        }
+        jmethodID jmid_pw_ctor;
+        if (raw::_find_method_id(env, &jmid_pw_ctor, jcls_pw, "<init>", "(Ljava/io/Writer;)V", false)) {
+            return "Cannot find PrintWriter constructor";
+        }
+        Method m_pw_ctor = {jmid_pw_ctor, "<init>", "(Ljava/io/Writer;)V"};
+        AutoLocalJobject jobj_pw;
+        if (raw::_invoke_new_object(env, reinterpret_cast<jobject*>(jobj_pw.address()), jcls_pw, &m_pw_ctor,
+                                    jobj_sw.get())) {
+            return "Failed to create PrintWriter instance";
+        }
+
+        AutoLocalJobject jcls_exception = env->GetObjectClass(jthr);
+        if (!jcls_exception) {
+            env->ExceptionClear();
+            return "Failed to get exception class";
+        }
+        jmethodID jmid_print_stack_trace;
+        if (raw::_find_method_id(env, &jmid_print_stack_trace, jcls_exception, "printStackTrace",
+                                 "(Ljava/io/PrintWriter;)V", false)) {
+            return "Cannot find printStackTrace method";
+        }
+        Method m_print_stack_trace = {jmid_print_stack_trace, "printStackTrace", "(Ljava/io/PrintWriter;)V"};
+        jvalue ignored;
+        if (raw::_invoke_object_method(env, &ignored, jthr, &m_print_stack_trace, jobj_pw.get())) {
+            return "Failed to invoke printStackTrace method";
+        }
+
+        jmethodID jmid_to_string;
+        if (raw::_find_method_id(env, &jmid_to_string, jcls_sw, "toString", "()Ljava/lang/String;", false)) {
+            return "Cannot find toString method of StringWriter";
+        }
+        Method m_to_string = {jmid_to_string, "toString", "()Ljava/lang/String;"};
+        jvalue jretval;
+        if (raw::_invoke_object_method(env, &jretval, jobj_sw, &m_to_string)) {
+            return "Failed to invoke toString method of StringWriter";
+        }
+        AutoLocalJobject jstr_stack_trace = jretval.l;
+        return jstr_to_str(env, static_cast<jstring>(jstr_stack_trace.get()));
+    } catch (...) {
+        return "Failed to get stack trace";
+    }
+}
+
+bool is_out_of_memory_error(JNIEnv* env, jthrowable jthr) {
+    return jthr && jcls_out_of_memory_error && env->IsInstanceOf(jthr, jcls_out_of_memory_error);
+}
 
 jclass find_class(JNIEnv* env, const char* class_name) {
     jclass jcls = nullptr;
@@ -346,8 +419,9 @@ jvalue invoke_object_method(JNIEnv* env, jobject jobj, Method* method, ...) {
 
     va_start(args, method);
     jvalue jretval;
-    THROW_JNI_EXCEPTION(env, raw::_invoke_object_methodV(env, &jretval, jobj, method, args));
+    jthrowable jthr = raw::_invoke_object_methodV(env, &jretval, jobj, method, args);
     va_end(args);
+    THROW_JNI_EXCEPTION(env, jthr);
 
     return jretval;
 }
@@ -357,8 +431,9 @@ jvalue invoke_static_method(JNIEnv* env, jclass jcls, Method* method, ...) {
 
     va_start(args, method);
     jvalue jretval;
-    THROW_JNI_EXCEPTION(env, raw::_invoke_static_methodV(env, &jretval, jcls, method, args));
+    jthrowable jthr = raw::_invoke_static_methodV(env, &jretval, jcls, method, args);
     va_end(args);
+    THROW_JNI_EXCEPTION(env, jthr);
 
     return jretval;
 }
@@ -368,10 +443,27 @@ jobject invoke_new_object(JNIEnv* env, jclass jcls, Method* method, ...) {
 
     va_start(args, method);
     jobject jobj;
-    THROW_JNI_EXCEPTION(env, raw::_invoke_new_objectV(env, &jobj, jcls, method, args));
+    jthrowable jthr = raw::_invoke_new_objectV(env, &jobj, jcls, method, args);
     va_end(args);
+    THROW_JNI_EXCEPTION(env, jthr);
 
     return jobj;
+}
+
+jobject new_global_ref(JNIEnv* env, jobject jobj) {
+    throw_if_jni_exception_pending(env, "NewGlobalRef");
+    if (!jobj) {
+        throw std::runtime_error("NewGlobalRef input is null");
+    }
+    return ensure_jni_result(env, env->NewGlobalRef(jobj), "NewGlobalRef");
+}
+
+jclass get_object_class(JNIEnv* env, jobject jobj) {
+    throw_if_jni_exception_pending(env, "GetObjectClass");
+    if (!jobj) {
+        throw std::runtime_error("GetObjectClass input is null");
+    }
+    return static_cast<jclass>(ensure_jni_result(env, env->GetObjectClass(jobj), "GetObjectClass"));
 }
 
 static std::string parse_type(const char* sig, size_t& index) {
@@ -418,34 +510,69 @@ std::string Method::to_string() const {
     return buffer;
 }
 
+int32_t jinteger_to_int32(JNIEnv* env, jobject jobj) {
+    AutoLocalJobject jcls_integer = get_object_class(env, jobj);
+    Method m_int_value = get_method(env, jcls_integer, "intValue", "()I", false);
+    return invoke_object_method(env, jobj, &m_int_value).i;
+}
+
+int64_t jlong_to_int64(JNIEnv* env, jstring jobj) {
+    AutoLocalJobject jcls_long = get_object_class(env, jobj);
+    Method m_long_value = get_method(env, jcls_long, "longValue", "()J", false);
+    return invoke_object_method(env, jobj, &m_long_value).j;
+}
+
 std::string jstr_to_str(JNIEnv* env, jstring jstr) {
     if (!jstr) return "";
-    const char* chars = env->GetStringUTFChars(jstr, nullptr);
-    std::string res = chars;
-    env->ReleaseStringUTFChars(jstr, chars);
-    return res;
+
+    Method m_get_bytes = get_method(env, jcls_string, "getBytes", "(Ljava/lang/String;)[B", false);
+    AutoLocalJobject jcharset = ensure_jni_result(env, env->NewStringUTF("UTF-8"), "NewStringUTF");
+    AutoLocalJobject jbytes = invoke_object_method(env, jstr, &m_get_bytes, jcharset.get()).l;
+    return jbytes_to_str(env, static_cast<jbyteArray>(jbytes.get()));
 }
 
 std::string jbytes_to_str(JNIEnv* env, jbyteArray jobj) {
-    jbyte* bytes = env->GetByteArrayElements(jobj, nullptr);
+    if (!jobj) {
+        throw std::runtime_error("GetByteArrayElements input is null");
+    }
+
     jsize length = env->GetArrayLength(jobj);
-    std::string result(reinterpret_cast<char*>(bytes), length);
+    throw_if_jni_call_failed(env, "GetArrayLength");
+    if (length == 0) return {};
+
+    jbyte* bytes = ensure_jni_result(env, env->GetByteArrayElements(jobj, nullptr), "GetByteArrayElements");
+    std::string result;
+    try {
+        result.assign(reinterpret_cast<char*>(bytes), length);
+    } catch (...) {
+        env->ReleaseByteArrayElements(jobj, bytes, JNI_ABORT);
+        throw;
+    }
     env->ReleaseByteArrayElements(jobj, bytes, JNI_ABORT);
     return result;
 }
 
 jobject new_jbytes(JNIEnv* env, const char* data, size_t size) {
-    jbyteArray jbytes = env->NewByteArray(size);
-    env->SetByteArrayRegion(jbytes, 0, size, reinterpret_cast<const jbyte*>(data));
+    if (size > static_cast<size_t>(std::numeric_limits<jsize>::max())) {
+        throw std::runtime_error("NewByteArray input is too large");
+    }
+
+    const auto jsize_size = static_cast<jsize>(size);
+    jbyteArray jbytes = ensure_jni_result(env, env->NewByteArray(jsize_size), "NewByteArray");
+    env->SetByteArrayRegion(jbytes, 0, jsize_size, reinterpret_cast<const jbyte*>(data));
+    try {
+        throw_if_jni_call_failed(env, "SetByteArrayRegion");
+    } catch (...) {
+        env->DeleteLocalRef(jbytes);
+        throw;
+    }
     return jbytes;
 }
 
 jobject get_from_jmap(JNIEnv* env, jobject jmap, const std::string& key) {
-    Method m_get = get_method(env, jcls_hashmap, "get", "(Ljava/lang/Object;)Ljava/lang/Object;", false);
-
-    AutoLocalJobject jstr_key = env->NewStringUTF(key.c_str());
-    jvalue jretval = invoke_object_method(env, jmap, &m_get, jstr_key.get());
-    return jretval.l;
+    Method m_get = get_method(env, jcls_map, "get", "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+    AutoLocalJobject jstr_key = new_jstr(env, key);
+    return invoke_object_method(env, jmap, &m_get, jstr_key.get()).l;
 }
 
 jobject map_to_jmap(JNIEnv* env, const std::map<std::string, std::string>& params) {
@@ -455,10 +582,9 @@ jobject map_to_jmap(JNIEnv* env, const std::map<std::string, std::string>& param
 
     jobject jmap = invoke_new_object(env, jcls_hashmap, &m_ctor);
     for (const auto& entry : params) {
-        AutoLocalJobject jstr_key = env->NewStringUTF(entry.first.c_str());
-        AutoLocalJobject jstr_value = env->NewStringUTF(entry.second.c_str());
-        jvalue jretval = invoke_object_method(env, jmap, &m_put, jstr_key.get(), jstr_value.get());
-        AutoLocalJobject tmp = jretval.l;
+        AutoLocalJobject jstr_key = new_jstr(env, entry.first);
+        AutoLocalJobject jstr_value = new_jstr(env, entry.second);
+        AutoLocalJobject tmp = invoke_object_method(env, jmap, &m_put, jstr_key.get(), jstr_value.get()).l;
     }
     return jmap;
 }
@@ -468,12 +594,69 @@ jobject vstrs_to_jlstrs(JNIEnv* env, const std::vector<std::string>& vec) {
     Method m_add = get_method(env, jcls_arraylist, "add", "(Ljava/lang/Object;)Z", false);
 
     jobject jlist = invoke_new_object(env, jcls_arraylist, &m_ctor);
-
     for (const auto& item : vec) {
-        AutoLocalJobject jstr_item = env->NewStringUTF(item.c_str());
+        AutoLocalJobject jstr_item = new_jstr(env, item);
         invoke_object_method(env, jlist, &m_add, jstr_item.get());
     }
     return jlist;
+}
+
+std::vector<std::string> jlbytes_to_vstrs(JNIEnv* env, jobject jlist) {
+    if (!jlist) {
+        throw std::runtime_error("Byte array list is null");
+    }
+
+    AutoLocalJobject jcls = get_object_class(env, jlist);
+    Method m_size = get_method(env, jcls, "size", "()I", false);
+    Method m_get = get_method(env, jcls, "get", "(I)Ljava/lang/Object;", false);
+    jint size = invoke_object_method(env, jlist, &m_size).i;
+
+    std::vector<std::string> result;
+    result.reserve(size);
+    for (jint i = 0; i < size; ++i) {
+        AutoLocalJobject jbytes = invoke_object_method(env, jlist, &m_get, i).l;
+        result.push_back(jbytes_to_str(env, static_cast<jbyteArray>(jbytes.get())));
+    }
+    return result;
+}
+
+std::vector<std::string> jlstrs_to_vstrs(JNIEnv* env, jobject jlist) {
+    if (!jlist) return {};
+
+    AutoLocalJobject jcls = get_object_class(env, jlist);
+    Method m_size = get_method(env, jcls, "size", "()I", false);
+    Method m_get = get_method(env, jcls, "get", "(I)Ljava/lang/Object;", false);
+    jint size = invoke_object_method(env, jlist, &m_size).i;
+
+    std::vector<std::string> result;
+    result.reserve(size);
+    for (jint i = 0; i < size; ++i) {
+        AutoLocalJobject jstr = invoke_object_method(env, jlist, &m_get, i).l;
+        result.push_back(jstr_to_str(env, static_cast<jstring>(jstr.get())));
+    }
+    return result;
+}
+
+jstring new_jstr(JNIEnv* env, const std::string& str) {
+    AutoLocalJobject jbytes = new_jbytes(env, str.data(), str.size());
+    AutoLocalJobject jcharset = ensure_jni_result(env, env->NewStringUTF("UTF-8"), "NewStringUTF");
+    Method m_ctor = get_method(env, jcls_string, "<init>", "([BLjava/lang/String;)V", false);
+    return static_cast<jstring>(invoke_new_object(env, jcls_string, &m_ctor, jbytes.get(), jcharset.get()));
+}
+
+std::vector<std::string> jstrs_to_vstrs(JNIEnv* env, jobjectArray jstrs) {
+    if (!jstrs) {
+        throw std::runtime_error("String array is null");
+    }
+
+    jsize length = env->GetArrayLength(jstrs);
+    throw_if_jni_call_failed(env, "GetArrayLength");
+    std::vector<std::string> result(length);
+    for (jsize i = 0; i < length; ++i) {
+        AutoLocalJobject jstr = ensure_jni_result(env, env->GetObjectArrayElement(jstrs, i), "GetObjectArrayElement");
+        result[i] = jstr_to_str(env, static_cast<jstring>(jstr.get()));
+    }
+    return result;
 }
 // --------------------------- MemoryMonitor ---------------------------
 
@@ -499,22 +682,22 @@ MemoryMonitor::MemoryMonitor() {
                                               "()Ljava/lang/management/CompilationMXBean;", true);
 
         AutoLocalJobject jobj_memory = invoke_static_method(env, jcls_management_factory, &m_get_memory_mxbean).l;
-        jobj_memory_mxbean = env->NewGlobalRef(jobj_memory.get());
+        jobj_memory_mxbean = new_global_ref(env, jobj_memory.get());
 
         AutoLocalJobject jobj_runtime = invoke_static_method(env, jcls_management_factory, &m_get_runtime_mxbean).l;
-        jobj_runtime_mxbean = env->NewGlobalRef(jobj_runtime.get());
+        jobj_runtime_mxbean = new_global_ref(env, jobj_runtime.get());
 
         AutoLocalJobject jobj_thread = invoke_static_method(env, jcls_management_factory, &m_get_thread_mxbean).l;
-        jobj_thread_mxbean = env->NewGlobalRef(jobj_thread.get());
+        jobj_thread_mxbean = new_global_ref(env, jobj_thread.get());
 
         AutoLocalJobject jobj_class_loading =
                 invoke_static_method(env, jcls_management_factory, &m_get_class_loading_mxbean).l;
-        jobj_class_loading_mxbean = env->NewGlobalRef(jobj_class_loading.get());
+        jobj_class_loading_mxbean = new_global_ref(env, jobj_class_loading.get());
 
         AutoLocalJobject jobj_compilation =
                 invoke_static_method(env, jcls_management_factory, &m_get_compilation_mxbean).l;
         if (jobj_compilation) {
-            jobj_compilation_mxbean = env->NewGlobalRef(jobj_compilation.get());
+            jobj_compilation_mxbean = new_global_ref(env, jobj_compilation.get());
         }
     }
 

@@ -1,5 +1,6 @@
 #include <jni.h>
 
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
@@ -57,6 +58,7 @@ struct Method {
 
 // Basic methods
 JNIEnv* get_env();
+bool is_jvm_created();
 
 namespace raw {
 
@@ -80,9 +82,13 @@ Method get_method(JNIEnv* env, jclass jcls, const char* method_name, const char*
 jvalue invoke_object_method(JNIEnv* env, jobject jobj, Method* method, ...);
 jvalue invoke_static_method(JNIEnv* env, jclass jcls, Method* method, ...);
 jobject invoke_new_object(JNIEnv* env, jclass jcls, Method* method, ...);
+jobject new_global_ref(JNIEnv* env, jobject jobj);
+jclass get_object_class(JNIEnv* env, jobject jobj);
 
 // Util methods
-std::string jstr_to_str(JNIEnv* env, jstring jstr);                                 // std::string to java.lang.String
+int32_t jinteger_to_int32(JNIEnv* env, jobject jobj);
+int64_t jlong_to_int64(JNIEnv* env, jstring jobj);
+std::string jstr_to_str(JNIEnv* env, jstring jstr);                                 // java.lang.String to std::string
 std::string jbytes_to_str(JNIEnv* env, jbyteArray jobj);                            // byte[] to std::string
 jobject new_jbytes(JNIEnv* env, const char* data, size_t size);                     // create byte[]
 jobject get_from_jmap(JNIEnv* env, jobject jmap, const std::string& key);           // java.util.Map get method
@@ -90,6 +96,13 @@ jobject map_to_jmap(JNIEnv* env, const std::map<std::string, std::string>& param
 jobject vstrs_to_jlstrs(
         JNIEnv* env,
         const std::vector<std::string>& vec); // std::vector<std::string> to java.util.List<java.lang.String>
+std::vector<std::string> jlbytes_to_vstrs(JNIEnv* env, jobject jlist);
+std::vector<std::string> jlstrs_to_vstrs(JNIEnv* env, jobject jlist);
+std::string get_exception_summary(JNIEnv* env, jthrowable jthr);
+std::string get_stack_trace(JNIEnv* env, jthrowable jthr);
+bool is_out_of_memory_error(JNIEnv* env, jthrowable jthr);
+jstring new_jstr(JNIEnv* env, const std::string& str);
+std::vector<std::string> jstrs_to_vstrs(JNIEnv* env, jobjectArray jstrs);
 
 enum RefType {
     LOCAL,
@@ -134,17 +147,23 @@ public:
     // NOLINTEND(google-explicit-constructor, google-runtime-int)
 
 private:
-    void release() {
+    void release() noexcept {
         if (_jobj == nullptr) {
             return;
         }
-        if constexpr (RefType::LOCAL == ref_type) {
-            get_env()->DeleteLocalRef(_jobj);
-        } else if constexpr (RefType::GLOBAL == ref_type) {
-            get_env()->DeleteGlobalRef(_jobj);
-        } else if constexpr (RefType::WEAK_GLOBAL == ref_type) {
-            get_env()->DeleteWeakGlobalRef(_jobj);
+
+        try {
+            if constexpr (RefType::LOCAL == ref_type) {
+                get_env()->DeleteLocalRef(_jobj);
+            } else if constexpr (RefType::GLOBAL == ref_type) {
+                get_env()->DeleteGlobalRef(_jobj);
+            } else if constexpr (RefType::WEAK_GLOBAL == ref_type) {
+                get_env()->DeleteWeakGlobalRef(_jobj);
+            }
+        } catch (...) {
+            // Reference cleanup is best effort and must not throw from a destructor.
         }
+
         _jobj = nullptr;
     }
     jobject _jobj;
@@ -261,15 +280,18 @@ private:
         }                                                                          \
     } while (false)
 
-#define THROW_JNI_EXCEPTION(env, expr)                                                                               \
-    do {                                                                                                             \
-        jni_utils::AutoLocalJobject TOKEN_CONCAT_FORWARD(jthr, __LINE__) = (expr);                                   \
-        if ((TOKEN_CONCAT_FORWARD(jthr, __LINE__)).operator bool()) {                                                \
-            throw std::runtime_error(                                                                                \
-                    "Receive JNI exception, message: " +                                                             \
-                    jni_utils::raw::_get_exception_message((env), (TOKEN_CONCAT_FORWARD(jthr, __LINE__))) +          \
-                    ", stack: " + jni_utils::raw::_get_jstack_trace((env), (TOKEN_CONCAT_FORWARD(jthr, __LINE__)))); \
-        }                                                                                                            \
+#define THROW_JNI_EXCEPTION(env, expr)                                                                        \
+    do {                                                                                                      \
+        jni_utils::AutoLocalJobject TOKEN_CONCAT_FORWARD(jthr, __LINE__) = (expr);                            \
+        if ((TOKEN_CONCAT_FORWARD(jthr, __LINE__)).operator bool()) {                                         \
+            if (jni_utils::is_out_of_memory_error((env), (TOKEN_CONCAT_FORWARD(jthr, __LINE__)))) {           \
+                throw std::runtime_error("Receive JNI OutOfMemoryError");                                     \
+            }                                                                                                 \
+            throw std::runtime_error(                                                                         \
+                    "Receive JNI exception, message: " +                                                      \
+                    jni_utils::get_exception_summary((env), (TOKEN_CONCAT_FORWARD(jthr, __LINE__))) +         \
+                    ", stack: " + jni_utils::get_stack_trace((env), (TOKEN_CONCAT_FORWARD(jthr, __LINE__)))); \
+        }                                                                                                     \
     } while (false)
 
 } // namespace jni_utils
