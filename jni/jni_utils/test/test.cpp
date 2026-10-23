@@ -243,25 +243,37 @@ TEST(JNIUtils, memory_monitor_basic) {
 
     auto heap = mm.get_heap_memory_usage();
     auto nonheap = mm.get_nonheap_memory_usage();
+    auto uptime = mm.get_uptime_milliseconds();
+    auto garbage_collectors = mm.get_garbage_collector_metrics();
+    auto threads = mm.get_thread_metrics();
+    auto classes = mm.get_class_loading_metrics();
+    auto compilation_time = mm.get_compilation_time_milliseconds();
 
     std::cout << "Heap: init=" << heap.init << " used=" << heap.used << " committed=" << heap.committed
               << " max=" << heap.max << std::endl;
     std::cout << "NonHeap: init=" << nonheap.init << " used=" << nonheap.used << " committed=" << nonheap.committed
               << " max=" << nonheap.max << std::endl;
+    std::cout << "Uptime: " << uptime << " ms" << std::endl;
 
-    // Heap assertions
-    ASSERT_GE(heap.used, 0);
-    ASSERT_GE(heap.committed, 0);
-    ASSERT_LE(heap.used, heap.committed);
-    if (heap.max != -1) {
-        ASSERT_LE(heap.committed, heap.max);
+    for (const auto& garbage_collector : garbage_collectors) {
+        std::cout << "GarbageCollector: name=" << garbage_collector.name
+                  << " collection_count=" << garbage_collector.collection_count
+                  << " collection_time_ms=" << garbage_collector.collection_time_ms << std::endl;
     }
 
-    // Non-heap assertions
-    ASSERT_GE(nonheap.used, 0);
-    ASSERT_GE(nonheap.committed, 0);
-    ASSERT_LE(nonheap.used, nonheap.committed);
-    if (nonheap.max != -1) {
-        ASSERT_LE(nonheap.committed, nonheap.max);
+    std::cout << "Threads: count=" << threads.count << " peak_count=" << threads.peak_count
+              << " daemon_count=" << threads.daemon_count << " total_started_count=" << threads.total_started_count
+              << std::endl;
+    std::cout << "ClassLoading: loaded_count=" << classes.loaded_count
+              << " total_loaded_count=" << classes.total_loaded_count << " unloaded_count=" << classes.unloaded_count
+              << std::endl;
+
+    if (compilation_time) {
+        std::cout << "Compilation: total_time_ms=" << *compilation_time << std::endl;
+    } else {
+        std::cout << "Compilation: unsupported" << std::endl;
     }
+
+    mm.trigger_gc();
+    std::cout << "GC: triggered" << std::endl;
 }

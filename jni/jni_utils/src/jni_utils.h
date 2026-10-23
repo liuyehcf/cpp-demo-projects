@@ -1,6 +1,7 @@
 #include <jni.h>
 
 #include <map>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -161,11 +162,38 @@ public:
         int64_t committed;
         int64_t max;
     };
+
+    struct GarbageCollectorMetrics {
+        std::string name;
+        int64_t collection_count;
+        int64_t collection_time_ms;
+    };
+
+    struct ThreadMetrics {
+        int64_t count;
+        int64_t peak_count;
+        int64_t daemon_count;
+        int64_t total_started_count;
+    };
+
+    struct ClassLoadingMetrics {
+        int64_t loaded_count;
+        int64_t total_loaded_count;
+        int64_t unloaded_count;
+    };
+
     MemoryMonitor();
     static MemoryMonitor& instance();
 
     MemoryUsage get_heap_memory_usage();
     MemoryUsage get_nonheap_memory_usage();
+    int64_t get_uptime_milliseconds();
+    std::vector<GarbageCollectorMetrics> get_garbage_collector_metrics();
+    ThreadMetrics get_thread_metrics();
+    ClassLoadingMetrics get_class_loading_metrics();
+    std::optional<int64_t> get_compilation_time_milliseconds();
+
+    void trigger_gc();
 
 private:
     MemoryUsage to_memory_usage(JNIEnv* env, jobject jobj_memory_usage);
@@ -173,16 +201,51 @@ private:
     AutoGlobalJobject jcls_management_factory;
     AutoGlobalJobject jcls_memory_mxbean;
     AutoGlobalJobject jcls_memory_usage;
+    AutoGlobalJobject jcls_buffer_pool_mxbean;
+    AutoGlobalJobject jcls_runtime_mxbean;
+    AutoGlobalJobject jcls_garbage_collector_mxbean;
+    AutoGlobalJobject jcls_thread_mxbean;
+    AutoGlobalJobject jcls_class_loading_mxbean;
+    AutoGlobalJobject jcls_compilation_mxbean;
+    AutoGlobalJobject jcls_list;
+    AutoGlobalJobject jcls_system;
 
     Method m_get_memory_mxbean;
+    Method m_get_platform_mxbeans;
+    Method m_get_runtime_mxbean;
+    Method m_get_garbage_collector_mxbeans;
+    Method m_get_thread_mxbean;
+    Method m_get_class_loading_mxbean;
+    Method m_get_compilation_mxbean;
     Method m_get_heap_memory_usage;
     Method m_get_non_heap_memory_usage;
     Method m_get_init;
     Method m_get_used;
     Method m_get_committed;
     Method m_get_max;
+    Method m_get_buffer_pool_memory_used;
+    Method m_get_uptime;
+    Method m_get_garbage_collector_name;
+    Method m_get_collection_count;
+    Method m_get_collection_time;
+    Method m_get_thread_count;
+    Method m_get_peak_thread_count;
+    Method m_get_daemon_thread_count;
+    Method m_get_total_started_thread_count;
+    Method m_get_loaded_class_count;
+    Method m_get_total_loaded_class_count;
+    Method m_get_unloaded_class_count;
+    Method m_is_compilation_time_monitoring_supported;
+    Method m_get_total_compilation_time;
+    Method m_list_size;
+    Method m_list_get;
+    Method m_gc;
 
     AutoGlobalJobject jobj_memory_mxbean;
+    AutoGlobalJobject jobj_runtime_mxbean;
+    AutoGlobalJobject jobj_thread_mxbean;
+    AutoGlobalJobject jobj_class_loading_mxbean;
+    AutoGlobalJobject jobj_compilation_mxbean;
 };
 
 // Concat x and y

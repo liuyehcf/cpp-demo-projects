@@ -485,10 +485,44 @@ MemoryMonitor::MemoryMonitor() {
 
         m_get_memory_mxbean = get_method(env, jcls_management_factory, "getMemoryMXBean",
                                          "()Ljava/lang/management/MemoryMXBean;", true);
+        m_get_platform_mxbeans = get_method(env, jcls_management_factory, "getPlatformMXBeans",
+                                            "(Ljava/lang/Class;)Ljava/util/List;", true);
+        m_get_runtime_mxbean = get_method(env, jcls_management_factory, "getRuntimeMXBean",
+                                          "()Ljava/lang/management/RuntimeMXBean;", true);
+        m_get_garbage_collector_mxbeans =
+                get_method(env, jcls_management_factory, "getGarbageCollectorMXBeans", "()Ljava/util/List;", true);
+        m_get_thread_mxbean = get_method(env, jcls_management_factory, "getThreadMXBean",
+                                         "()Ljava/lang/management/ThreadMXBean;", true);
+        m_get_class_loading_mxbean = get_method(env, jcls_management_factory, "getClassLoadingMXBean",
+                                                "()Ljava/lang/management/ClassLoadingMXBean;", true);
+        m_get_compilation_mxbean = get_method(env, jcls_management_factory, "getCompilationMXBean",
+                                              "()Ljava/lang/management/CompilationMXBean;", true);
 
-        jvalue return_val = invoke_static_method(env, jcls_management_factory, &m_get_memory_mxbean);
-        AutoLocalJobject jmxbean = return_val.l;
-        jobj_memory_mxbean = env->NewGlobalRef(jmxbean.get());
+        AutoLocalJobject jobj_memory = invoke_static_method(env, jcls_management_factory, &m_get_memory_mxbean).l;
+        jobj_memory_mxbean = env->NewGlobalRef(jobj_memory.get());
+
+        AutoLocalJobject jobj_runtime = invoke_static_method(env, jcls_management_factory, &m_get_runtime_mxbean).l;
+        jobj_runtime_mxbean = env->NewGlobalRef(jobj_runtime.get());
+
+        AutoLocalJobject jobj_thread = invoke_static_method(env, jcls_management_factory, &m_get_thread_mxbean).l;
+        jobj_thread_mxbean = env->NewGlobalRef(jobj_thread.get());
+
+        AutoLocalJobject jobj_class_loading =
+                invoke_static_method(env, jcls_management_factory, &m_get_class_loading_mxbean).l;
+        jobj_class_loading_mxbean = env->NewGlobalRef(jobj_class_loading.get());
+
+        AutoLocalJobject jobj_compilation =
+                invoke_static_method(env, jcls_management_factory, &m_get_compilation_mxbean).l;
+        if (jobj_compilation) {
+            jobj_compilation_mxbean = env->NewGlobalRef(jobj_compilation.get());
+        }
+    }
+
+    {
+        jcls_list = find_class(env, "java/util/List");
+
+        m_list_size = get_method(env, jcls_list, "size", "()I", false);
+        m_list_get = get_method(env, jcls_list, "get", "(I)Ljava/lang/Object;", false);
     }
 
     {
@@ -507,6 +541,61 @@ MemoryMonitor::MemoryMonitor() {
         m_get_used = get_method(env, jcls_memory_usage, "getUsed", "()J", false);
         m_get_committed = get_method(env, jcls_memory_usage, "getCommitted", "()J", false);
         m_get_max = get_method(env, jcls_memory_usage, "getMax", "()J", false);
+    }
+
+    {
+        jcls_buffer_pool_mxbean = find_class(env, "java/lang/management/BufferPoolMXBean");
+
+        m_get_buffer_pool_memory_used = get_method(env, jcls_buffer_pool_mxbean, "getMemoryUsed", "()J", false);
+    }
+
+    {
+        jcls_runtime_mxbean = find_class(env, "java/lang/management/RuntimeMXBean");
+
+        m_get_uptime = get_method(env, jcls_runtime_mxbean, "getUptime", "()J", false);
+    }
+
+    {
+        jcls_garbage_collector_mxbean = find_class(env, "java/lang/management/GarbageCollectorMXBean");
+
+        m_get_garbage_collector_name =
+                get_method(env, jcls_garbage_collector_mxbean, "getName", "()Ljava/lang/String;", false);
+        m_get_collection_count = get_method(env, jcls_garbage_collector_mxbean, "getCollectionCount", "()J", false);
+        m_get_collection_time = get_method(env, jcls_garbage_collector_mxbean, "getCollectionTime", "()J", false);
+    }
+
+    {
+        jcls_thread_mxbean = find_class(env, "java/lang/management/ThreadMXBean");
+
+        m_get_thread_count = get_method(env, jcls_thread_mxbean, "getThreadCount", "()I", false);
+        m_get_peak_thread_count = get_method(env, jcls_thread_mxbean, "getPeakThreadCount", "()I", false);
+        m_get_daemon_thread_count = get_method(env, jcls_thread_mxbean, "getDaemonThreadCount", "()I", false);
+        m_get_total_started_thread_count =
+                get_method(env, jcls_thread_mxbean, "getTotalStartedThreadCount", "()J", false);
+    }
+
+    {
+        jcls_class_loading_mxbean = find_class(env, "java/lang/management/ClassLoadingMXBean");
+
+        m_get_loaded_class_count = get_method(env, jcls_class_loading_mxbean, "getLoadedClassCount", "()I", false);
+        m_get_total_loaded_class_count =
+                get_method(env, jcls_class_loading_mxbean, "getTotalLoadedClassCount", "()J", false);
+        m_get_unloaded_class_count = get_method(env, jcls_class_loading_mxbean, "getUnloadedClassCount", "()J", false);
+    }
+
+    {
+        jcls_compilation_mxbean = find_class(env, "java/lang/management/CompilationMXBean");
+
+        m_is_compilation_time_monitoring_supported =
+                get_method(env, jcls_compilation_mxbean, "isCompilationTimeMonitoringSupported", "()Z", false);
+        m_get_total_compilation_time =
+                get_method(env, jcls_compilation_mxbean, "getTotalCompilationTime", "()J", false);
+    }
+
+    {
+        jcls_system = find_class(env, "java/lang/System");
+
+        m_gc = get_method(env, jcls_system, "gc", "()V", true);
     }
 }
 
@@ -537,7 +626,87 @@ MemoryMonitor::MemoryUsage MemoryMonitor::get_nonheap_memory_usage() {
     JNIEnv* env = get_env();
 
     AutoLocalJobject jobj_memory_usage = invoke_object_method(env, jobj_memory_mxbean, &m_get_non_heap_memory_usage).l;
-    return to_memory_usage(env, jobj_memory_usage.get());
+    MemoryUsage result = to_memory_usage(env, jobj_memory_usage.get());
+
+    // BufferPoolMXBean has no init/committed/max values. Treat its current native
+    // allocation as both used and committed, and mark the combined maximum unknown.
+    AutoLocalJobject jobj_buffer_pools =
+            invoke_static_method(env, jcls_management_factory, &m_get_platform_mxbeans, jcls_buffer_pool_mxbean.get())
+                    .l;
+    const jint buffer_pool_count = invoke_object_method(env, jobj_buffer_pools, &m_list_size).i;
+    if (buffer_pool_count > 0) {
+        result.max = -1;
+    }
+
+    for (jint i = 0; i < buffer_pool_count; ++i) {
+        AutoLocalJobject jobj_buffer_pool = invoke_object_method(env, jobj_buffer_pools, &m_list_get, i).l;
+        const jlong memory_used = invoke_object_method(env, jobj_buffer_pool, &m_get_buffer_pool_memory_used).j;
+        if (memory_used >= 0) {
+            result.used += memory_used;
+            result.committed += memory_used;
+        }
+    }
+
+    return result;
+}
+
+int64_t MemoryMonitor::get_uptime_milliseconds() {
+    JNIEnv* env = get_env();
+    return invoke_object_method(env, jobj_runtime_mxbean, &m_get_uptime).j;
+}
+
+std::vector<MemoryMonitor::GarbageCollectorMetrics> MemoryMonitor::get_garbage_collector_metrics() {
+    JNIEnv* env = get_env();
+    std::vector<GarbageCollectorMetrics> result;
+
+    AutoLocalJobject jobj_garbage_collectors =
+            invoke_static_method(env, jcls_management_factory, &m_get_garbage_collector_mxbeans).l;
+    const jint garbage_collector_count = invoke_object_method(env, jobj_garbage_collectors, &m_list_size).i;
+    result.reserve(garbage_collector_count);
+
+    for (jint i = 0; i < garbage_collector_count; ++i) {
+        AutoLocalJobject jobj_garbage_collector = invoke_object_method(env, jobj_garbage_collectors, &m_list_get, i).l;
+        AutoLocalJobject jstr_name = invoke_object_method(env, jobj_garbage_collector, &m_get_garbage_collector_name).l;
+        result.push_back(
+                GarbageCollectorMetrics{jstr_to_str(env, static_cast<jstring>(jstr_name.get())),
+                                        invoke_object_method(env, jobj_garbage_collector, &m_get_collection_count).j,
+                                        invoke_object_method(env, jobj_garbage_collector, &m_get_collection_time).j});
+    }
+
+    return result;
+}
+
+MemoryMonitor::ThreadMetrics MemoryMonitor::get_thread_metrics() {
+    JNIEnv* env = get_env();
+    return ThreadMetrics{invoke_object_method(env, jobj_thread_mxbean, &m_get_thread_count).i,
+                         invoke_object_method(env, jobj_thread_mxbean, &m_get_peak_thread_count).i,
+                         invoke_object_method(env, jobj_thread_mxbean, &m_get_daemon_thread_count).i,
+                         invoke_object_method(env, jobj_thread_mxbean, &m_get_total_started_thread_count).j};
+}
+
+MemoryMonitor::ClassLoadingMetrics MemoryMonitor::get_class_loading_metrics() {
+    JNIEnv* env = get_env();
+    return ClassLoadingMetrics{invoke_object_method(env, jobj_class_loading_mxbean, &m_get_loaded_class_count).i,
+                               invoke_object_method(env, jobj_class_loading_mxbean, &m_get_total_loaded_class_count).j,
+                               invoke_object_method(env, jobj_class_loading_mxbean, &m_get_unloaded_class_count).j};
+}
+
+std::optional<int64_t> MemoryMonitor::get_compilation_time_milliseconds() {
+    if (!jobj_compilation_mxbean) {
+        return std::nullopt;
+    }
+
+    JNIEnv* env = get_env();
+    if (!invoke_object_method(env, jobj_compilation_mxbean, &m_is_compilation_time_monitoring_supported).z) {
+        return std::nullopt;
+    }
+
+    return invoke_object_method(env, jobj_compilation_mxbean, &m_get_total_compilation_time).j;
+}
+
+void MemoryMonitor::trigger_gc() {
+    JNIEnv* env = get_env();
+    invoke_static_method(env, jcls_system, &m_gc);
 }
 
 } // namespace jni_utils
